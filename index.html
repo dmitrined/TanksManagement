@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weinbehälter-Management (Lokal)</title>
+    <!-- Подключение Tailwind CSS для стилей -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Стиль для шрифта Inter */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+
+        /* Основной контейнер плана - адаптивная сетка */
+        #plan-container {
+            display: grid;
+            /* Адаптивная сетка: автоматическое размещение элементов, минимальная ширина колонки 120px */
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            width: 95%;
+            max-width: 1200px;
+            margin: 20px auto;
+            border: 1px solid #d1d5db;
+            background-color: #fff;
+            padding: 16px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            border-radius: 12px;
+        }
+
+        /* Стиль для отдельной бочки/емкости */
+        .tank {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 60px;
+            color: #fff;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border: none;
+            padding: 5px;
+        }
+
+        .tank:hover {
+            opacity: 0.9;
+            transform: scale(1.03);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+
+        /* Цветовая кодировка */
+        .tank-full {
+            background-color: #dc2626; /* Красный */
+        }
+        .tank-empty {
+            background-color: #10b981; /* Зеленый */
+        }
+        .tank-unknown {
+            background-color: #f59e0b; /* Желтый (если статус неясен) */
+        }
+        .config-error {
+             background-color: #fef2f2;
+             border-color: #fca5a5;
+             color: #ef4444;
+        }
+
+    </style>
+</head>
+<body class="p-4">
+
+    <!-- Заголовок -->
+    <header class="text-center mb-6">
+        <h1 class="text-3xl font-bold text-gray-800">Weinbehälter-Management (1 - 100)</h1>
+        <p id="auth-status" class="text-sm text-gray-600">Status: Lokaler Speicher (localStorage)</p>
+        <p class="text-xs text-gray-500 mt-1">Grün: Leer | Rot: Gefüllt. Zum Verwalten antippen.</p>
+    </header>
+
+    <!-- Главный контейнер списка емкостей -->
+    <div id="plan-container">
+        <!-- Емкости будут добавлены сюда с помощью JS -->
+    </div>
+
+    <!-- Модальное окно для информации и добавления вина -->
+    <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-gray-800">Behälter Nr.</h2>
+            <div id="modal-content">
+                <!-- Здесь будет отображаться информация о емкости или форма -->
+            </div>
+            <div class="mt-6 text-right">
+                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Шаблон для сообщения (вместо alert()) -->
+    <div id="message-box" class="fixed top-4 right-4 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50 transition-transform transform translate-x-full hidden"></div>
+
+    <script>
+        // Глобальный объект для хранения данных всех емкостей
+        window.tanksData = {};
+        window.currentTankId = null;
+
+        // Ключ для localStorage
+        const STORAGE_KEY = 'WINE_TANK_DATA_V1';
+        
+        // Определяем список емкостей для отображения на плане: от 1 до 100
+        const TANK_IDS = Array.from({ length: 100 }, (_, i) => (i + 1).toString());
+
+        // --- Утилиты ---
+
+        /** Определяет номинальный объем емкости на основе ее ID. */
+        function getTankVolume(id) {
+            const tankId = parseInt(id, 10);
+            if (tankId >= 1 && tankId <= 25) {
+                return '5,000 L';
+            } else if (tankId > 25 && tankId <= 75) {
+                return '15,000 L';
+            } else if (tankId > 75 && tankId <= 100) {
+                return '25,000 L';
+            }
+            return 'N/A';
+        }
+        
+        /** Показывает сообщение на экране вместо alert() */
+        window.showMessage = function(message, type = 'success') {
+            const box = document.getElementById('message-box');
+            box.textContent = message;
+            box.classList.remove('hidden', 'bg-green-500', 'bg-red-500', 'bg-blue-500');
+            box.classList.add(type === 'error' ? 'bg-red-500' : (type === 'info' ? 'bg-blue-500' : 'bg-green-500'));
+            
+            box.classList.remove('translate-x-full');
+            
+            setTimeout(() => {
+                box.classList.add('translate-x-full');
+                setTimeout(() => box.classList.add('hidden'), 300); 
+            }, 3000);
+        }
+
+        /** Открывает модальное окно */
+        window.openModal = function(tankId) {
+            window.currentTankId = tankId;
+            const tank = window.tanksData[tankId];
+            const title = document.getElementById('modal-title');
+            const content = document.getElementById('modal-content');
+            const modal = document.getElementById('modal');
+            const volume = getTankVolume(tankId);
+
+            title.textContent = `Behälter Nr.${tankId}`;
+            content.innerHTML = ''; 
+
+            if (!tank) {
+                // Это не должно произойти, если initializeStorageAndDisplay отработал корректно
+                content.innerHTML = '<p class="text-red-600 font-semibold">Daten für diesen Behälter konnten nicht geladen werden.</p>';
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                return;
+            }
+
+            let htmlContent = '';
+            if (tank.isFull && tank.wineDetails) {
+                // Если заполнена - показываем информацию
+                // В локальном хранилище время сохраняется как ISO строка
+                const addedDate = tank.wineDetails.addedAt ? new Date(tank.wineDetails.addedAt).toLocaleString('de-DE') : 'Unbekannt';
+                
+                htmlContent = `
+                    <div class="space-y-3">
+                        <p><span class="font-semibold">Tankvolumen:</span> <span class="font-bold text-gray-700">${volume}</span></p>
+                        <p><span class="font-semibold">Status:</span> <span class="text-red-600 font-bold">Gefüllt</span></p>
+                        <hr class="border-gray-200">
+                        <p><span class="font-semibold">Jahrgang:</span> ${tank.wineDetails.year || 'N/A'}</p>
+                        <p><span class="font-semibold">Rebsorte:</span> ${tank.wineDetails.variety || 'N/A'}</p>
+                        <p><span class="font-semibold">Qualität:</span> ${tank.wineDetails.quality || 'N/A'}</p>
+                        <p class="text-xs text-gray-500 pt-2">Hinzugefügt am: ${addedDate}</p>
+                        <button onclick="emptyTank('${tankId}')" class="w-full mt-4 px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition duration-150 shadow-md">Behälter leeren</button>
+                    </div>
+                `;
+            } else {
+                // Если пуста - показываем форму добавления
+                htmlContent = `
+                    <p class="mb-2"><span class="font-semibold">Tankvolumen:</span> <span class="font-bold text-gray-700">${volume}</span></p>
+                    <p class="mb-4"><span class="font-semibold">Status:</span> <span class="text-green-600 font-bold">Leer</span>. Geben Sie die Weindaten ein, um den Behälter zu füllen.</p>
+                    <form id="add-wine-form" onsubmit="event.preventDefault(); addWine(event)">
+                        <div class="mb-3">
+                            <label for="wine-year" class="block text-sm font-medium text-gray-700">Jahrgang (JJJJ)</label>
+                            <input type="number" id="wine-year" name="year" required min="1900" max="${new Date().getFullYear()}" value="${new Date().getFullYear()}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div class="mb-3">
+                            <label for="wine-variety" class="block text-sm font-medium text-gray-700">Rebsorte</label>
+                            <input type="text" id="wine-variety" name="variety" required placeholder="Z.B. Cabernet Sauvignon" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div class="mb-4">
+                            <label for="wine-quality" class="block text-sm font-medium text-gray-700">Qualität (Klassifikation)</label>
+                            <select id="wine-quality" name="quality" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="Gutswein">Gutswein</option>
+                                <option value="Edition C">Edition C</option>
+                                <option value="Edition S">Edition S</option>
+                                <option value="Edition P">Edition P</option>
+                                <option value="Edition Federle">Edition Federle</option>
+                                <option value="QbA">QbA</option>
+                                <option value="Auslese">Auslese</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition duration-150 shadow-md">Wein hinzufügen & füllen</button>
+                    </form>
+                `;
+            }
+
+            content.innerHTML = htmlContent;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        /** Закрывает модальное окно */
+        window.closeModal = function() {
+            document.getElementById('modal').classList.add('hidden');
+            document.getElementById('modal').classList.remove('flex');
+            window.currentTankId = null;
+        }
+
+        // --- Логика localStorage ---
+
+        /** Загружает данные емкостей из localStorage */
+        function loadTanksFromStorage() {
+            try {
+                const storedData = localStorage.getItem(STORAGE_KEY);
+                return storedData ? JSON.parse(storedData) : {};
+            } catch (e) {
+                console.error("Ошибка при загрузке данных из localStorage:", e);
+                return {};
+            }
+        }
+
+        /** Сохраняет текущие данные емкостей в localStorage */
+        function saveTanksToStorage() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(window.tanksData));
+            } catch (e) {
+                console.error("Ошибка при сохранении данных в localStorage:", e);
+                window.showMessage('Fehler beim Speichern der Daten lokal.', 'error');
+            }
+        }
+
+        /** Инициализация хранилища: загрузка данных и заполнение недостающих емкостей */
+        function initializeStorageAndDisplay() {
+            const loadedData = loadTanksFromStorage();
+            let needsUpdate = false;
+
+            // Инициализация или сброс данных для всех 100 емкостей
+            TANK_IDS.forEach(id => {
+                if (!loadedData[id]) {
+                    window.tanksData[id] = {
+                        id: id,
+                        isFull: false,
+                        wineDetails: null
+                    };
+                    needsUpdate = true;
+                } else {
+                    window.tanksData[id] = loadedData[id];
+                }
+            });
+
+            // Если были добавлены новые (отсутствующие) емкости, сохраняем изменения
+            if (needsUpdate) {
+                saveTanksToStorage();
+            }
+            
+            // Обновление UI
+            updateTankDisplay();
+        }
+
+        /** Обновление внешнего вида бочек на плане */
+        function updateTankDisplay() {
+            TANK_IDS.forEach(id => {
+                const tankElement = document.querySelector(`.tank[data-id="${id}"]`);
+                const data = window.tanksData[id];
+
+                if (tankElement) {
+                    tankElement.classList.remove('tank-full', 'tank-empty', 'tank-unknown');
+                    
+                    if (data && data.hasOwnProperty('isFull')) {
+                        tankElement.classList.add(data.isFull ? 'tank-full' : 'tank-empty');
+                    } else {
+                        // Если статус неизвестен (на случай ошибки данных)
+                        tankElement.classList.add('tank-unknown'); 
+                    }
+                }
+            });
+        }
+
+        /** Добавление вина (заполнение емкости) */
+        window.addWine = function(event) {
+            const form = event.target;
+            const tankId = window.currentTankId;
+            const year = form.elements['year'].value;
+            const variety = form.elements['variety'].value;
+            const quality = form.elements['quality'].value;
+
+            if (!tankId) {
+                window.showMessage('Fehler: Behälter-ID fehlt.', 'error');
+                return;
+            }
+
+            window.closeModal();
+            window.showMessage(`Fülle Behälter ${tankId}...`, 'info');
+
+            // 1. Обновление данных в памяти
+            window.tanksData[tankId] = {
+                id: tankId,
+                isFull: true,
+                wineDetails: {
+                    year: parseInt(year, 10),
+                    variety: variety,
+                    quality: quality,
+                    addedAt: new Date().toISOString() // Используем ISO строку для даты
+                }
+            };
+            
+            // 2. Сохранение в localStorage
+            saveTanksToStorage();
+            
+            // 3. Обновление UI
+            updateTankDisplay();
+
+            window.showMessage(`Behälter ${tankId} erfolgreich gefüllt!`, 'success');
+        }
+
+        /** Очистка емкости (делаем ее пустой) */
+        window.emptyTank = function(tankId) {
+            if (!tankId) {
+                window.showMessage('Fehler: Behälter-ID fehlt.', 'error');
+                return;
+            }
+
+            window.closeModal();
+            window.showMessage(`Leere Behälter ${tankId}...`, 'info');
+
+            // 1. Обновление данных в памяти
+            window.tanksData[tankId] = {
+                id: tankId,
+                isFull: false,
+                wineDetails: null
+            };
+
+            // 2. Сохранение в localStorage
+            saveTanksToStorage();
+
+            // 3. Обновление UI
+            updateTankDisplay();
+
+            window.showMessage(`Behälter ${tankId} erfolgreich geleert.`, 'success');
+        }
+
+        // --- Рендеринг плана ---
+
+        /** Инициализация и рендеринг DOM элементов бочек */
+        function renderInitialPlan() {
+            const container = document.getElementById('plan-container');
+            container.innerHTML = ''; // Очистка
+
+            TANK_IDS.forEach(id => {
+                const volume = getTankVolume(id);
+                const tankDiv = document.createElement('div');
+                tankDiv.className = 'tank tank-unknown'; // Начальный класс: неизвестно (желтый)
+                tankDiv.setAttribute('data-id', id);
+                
+                tankDiv.innerHTML = `
+                    <div class="text-xl leading-none">${id}</div>
+                    <div class="text-xs font-normal opacity-90 leading-none mt-1">${volume}</div>
+                `;
+
+                // Используем window.openModal, чтобы сделать функцию доступной
+                tankDiv.onclick = () => window.openModal(id);
+                container.appendChild(tankDiv);
+            });
+        }
+
+        // Запуск приложения
+        window.onload = function() {
+            renderInitialPlan(); // Рендерим UI немедленно
+            initializeStorageAndDisplay(); // Загружаем данные из localStorage и обновляем цвета
+        };
+    </script>
+</body>
+</html>
