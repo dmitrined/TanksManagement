@@ -80,6 +80,19 @@
         <p class="text-xs text-gray-500 mt-1">Grün: Leer | Rot: Gefüllt. Zum Verwalten antippen.</p>
     </header>
 
+    <!-- Контейнер для кнопок фильтрации -->
+    <div id="filter-controls" class="text-center mb-6">
+        <button id="filter-all" onclick="filterTanks('all')" class="filter-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg mr-2 transition duration-150 shadow-md">
+            Alle Behälter
+        </button>
+        <button id="filter-empty" onclick="filterTanks('empty')" class="filter-btn bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg mr-2 transition duration-150 shadow-md">
+            Leere Behälter
+        </button>
+        <button id="filter-full" onclick="filterTanks('full')" class="filter-btn bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md">
+            Gefüllte Behälter
+        </button>
+    </div>
+
     <!-- Главный контейнер списка емкостей -->
     <div id="plan-container">
         <!-- Емкости будут добавлены сюда с помощью JS -->
@@ -105,7 +118,8 @@
         // Глобальный объект для хранения данных всех емкостей
         window.tanksData = {};
         window.currentTankId = null;
-
+        window.currentFilter = 'all'; // Добавляем глобальную переменную для фильтра по умолчанию
+        
         // Ключ для localStorage
         const STORAGE_KEY = 'WINE_TANK_DATA_V1';
         
@@ -155,7 +169,7 @@
             content.innerHTML = ''; 
 
             if (!tank) {
-                // Это не должно произойти, если initializeStorageAndDisplay отработал корректно
+                // Dies sollte nicht passieren, wenn initializeStorageAndDisplay korrekt ausgeführt wurde
                 content.innerHTML = '<p class="text-red-600 font-semibold">Daten für diesen Behälter konnten nicht geladen werden.</p>';
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
@@ -164,8 +178,7 @@
 
             let htmlContent = '';
             if (tank.isFull && tank.wineDetails) {
-                // Если заполнена - показываем информацию
-                // В локальном хранилище время сохраняется как ISO строка
+                // Wenn gefüllt - Informationen anzeigen
                 const addedDate = tank.wineDetails.addedAt ? new Date(tank.wineDetails.addedAt).toLocaleString('de-DE') : 'Unbekannt';
                 
                 htmlContent = `
@@ -181,7 +194,7 @@
                     </div>
                 `;
             } else {
-                // Если пуста - показываем форму добавления
+                // Wenn leer - Formular zum Hinzufügen anzeigen
                 htmlContent = `
                     <p class="mb-2"><span class="font-semibold">Tankvolumen:</span> <span class="font-bold text-gray-700">${volume}</span></p>
                     <p class="mb-4"><span class="font-semibold">Status:</span> <span class="text-green-600 font-bold">Leer</span>. Geben Sie die Weindaten ein, um den Behälter zu füllen.</p>
@@ -231,7 +244,7 @@
                 const storedData = localStorage.getItem(STORAGE_KEY);
                 return storedData ? JSON.parse(storedData) : {};
             } catch (e) {
-                console.error("Ошибка при загрузке данных из localStorage:", e);
+                console.error("Fehler beim Laden der Daten aus localStorage:", e);
                 return {};
             }
         }
@@ -241,7 +254,7 @@
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(window.tanksData));
             } catch (e) {
-                console.error("Ошибка при сохранении данных в localStorage:", e);
+                console.error("Fehler beim Speichern der Daten in localStorage:", e);
                 window.showMessage('Fehler beim Speichern der Daten lokal.', 'error');
             }
         }
@@ -270,11 +283,25 @@
                 saveTanksToStorage();
             }
             
-            // Обновление UI
+            // Обновление UI с учетом текущего фильтра
             updateTankDisplay();
         }
 
-        /** Обновление внешнего вида бочек на плане */
+        /** Обновляет стили кнопок фильтрации */
+        function updateFilterButtons(activeFilter) {
+            document.querySelectorAll('#filter-controls .filter-btn').forEach(button => {
+                // Удаление активного стиля: убираем кольцо (ring)
+                button.classList.remove('ring-4', 'ring-offset-2', 'ring-gray-400'); 
+            });
+
+            const activeButton = document.getElementById(`filter-${activeFilter}`);
+            if (activeButton) {
+                // Добавление активного стиля: серое кольцо для выделения
+                activeButton.classList.add('ring-4', 'ring-offset-2', 'ring-gray-400');
+            }
+        }
+
+        /** Обновление внешнего вида бочек на плане (включая фильтрацию) */
         function updateTankDisplay() {
             TANK_IDS.forEach(id => {
                 const tankElement = document.querySelector(`.tank[data-id="${id}"]`);
@@ -283,15 +310,52 @@
                 if (tankElement) {
                     tankElement.classList.remove('tank-full', 'tank-empty', 'tank-unknown');
                     
+                    let isVisible = true;
+                    
                     if (data && data.hasOwnProperty('isFull')) {
-                        tankElement.classList.add(data.isFull ? 'tank-full' : 'tank-empty');
+                        const isFull = data.isFull;
+                        tankElement.classList.add(isFull ? 'tank-full' : 'tank-empty');
+                        
+                        // Логика фильтрации
+                        if (window.currentFilter === 'empty' && isFull) {
+                            isVisible = false;
+                        } else if (window.currentFilter === 'full' && !isFull) {
+                            isVisible = false;
+                        }
                     } else {
-                        // Если статус неизвестен (на случай ошибки данных)
+                        // Wenn Status unbekannt ist (im Fehlerfall)
                         tankElement.classList.add('tank-unknown'); 
+                        if (window.currentFilter !== 'all') {
+                            isVisible = false; // Unbekannte ausblenden, wenn nicht "alle" aktiv ist
+                        }
                     }
+
+                    // Применение видимости
+                    tankElement.style.display = isVisible ? 'flex' : 'none';
                 }
             });
+            
+            // Обновляем внешний вид кнопок после применения фильтра
+            updateFilterButtons(window.currentFilter);
         }
+
+        /** Функция фильтрации, вызываемая кнопками */
+        window.filterTanks = function(status) {
+            window.currentFilter = status;
+            updateTankDisplay(); // Перерисовка с новым фильтром
+            
+            // Сообщение пользователю
+            let message = '';
+            if (status === 'all') {
+                message = 'Alle Behälter werden angezeigt.';
+            } else if (status === 'empty') {
+                message = 'Nur leere Behälter (Grün) werden angezeigt.';
+            } else if (status === 'full') {
+                message = 'Nur gefüllte Behälter (Rot) werden angezeigt.';
+            }
+            window.showMessage(message, 'info');
+        }
+
 
         /** Добавление вина (заполнение емкости) */
         window.addWine = function(event) {
@@ -383,7 +447,8 @@
         // Запуск приложения
         window.onload = function() {
             renderInitialPlan(); // Рендерим UI немедленно
-            initializeStorageAndDisplay(); // Загружаем данные из localStorage и обновляем цвета
+            initializeStorageAndDisplay(); // Загружаем данные из localStorage и обновляем цвета/фильтр
+            // При загрузке страницы автоматически активируется фильтр 'all' и кнопка подсвечивается
         };
     </script>
 </body>
