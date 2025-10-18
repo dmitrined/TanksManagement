@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wein-Tank-Management (Aktualisiert V4)</title>
+    <title>Wein-Tank-Management (Konfigurierbar)</title>
     <!-- Подключение Tailwind CSS для стилей -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -78,11 +78,18 @@
 </head>
 <body class="p-4">
 
-    <!-- Заголовок -->
+    <!-- Заголовок и управление конфигурацией -->
     <header class="text-center mb-6">
         <h1 class="text-3xl font-bold text-gray-800">Wein-Tank-Management (1 - 100)</h1>
-        <p id="auth-status" class="text-sm text-gray-600">Status: Lokaler Speicher (localStorage)</p>
-        <p class="text-xs text-gray-500 mt-1">
+        
+        <div class="flex flex-col sm:flex-row justify-center items-center mt-2 space-y-2 sm:space-y-0 sm:space-x-4">
+            <p id="auth-status" class="text-sm text-gray-600">Status: Lokaler Speicher (localStorage)</p>
+            <button onclick="openConfigModal()" class="px-3 py-1 bg-indigo-500 text-white text-sm rounded-lg font-semibold hover:bg-indigo-600 transition duration-150 shadow-md">
+                Tank-Konfiguration
+            </button>
+        </div>
+
+        <p class="text-xs text-gray-500 mt-3">
             <span class="text-green-600 font-bold">Grün</span>: Leer | 
             <span class="text-red-600 font-bold">Rot</span>: Gefüllt | 
             <span class="text-yellow-600 font-bold">Gelb</span>: Reserviert | 
@@ -106,18 +113,18 @@
 
     <!-- Главный контейнер списка емкостей -->
     <div id="plan-container">
-        <!-- Емкости будут добавлены сюда с помощью JS -->
+        <!-- Tanks будут добавлены сюда с помощью JS -->
     </div>
 
-    <!-- Модальное окно для информации и добавления вина -->
+    <!-- Модальное окно (Общее для Tank-Details и Konfiguration) -->
     <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all">
-            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-gray-800">Tank Nr.</h2>
+        <div id="modal-container" class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-gray-800"></h2>
             <div id="modal-content">
-                <!-- Здесь будет отображаться информация о емкости или форма -->
+                <!-- Здесь будет отображаться информация о Tank'е или форма конфигурации -->
             </div>
-            <div class="mt-6 text-right">
-                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>
+            <div id="modal-footer" class="mt-6 text-right">
+                <!-- Кнопки будут добавлены динамически -->
             </div>
         </div>
     </div>
@@ -126,32 +133,87 @@
     <div id="message-box" class="fixed top-4 right-4 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50 transition-transform transform translate-x-full hidden"></div>
 
     <script>
-        // Глобальный объект для хранения данных всех емкостей/танков
-        window.tanksData = {};
+        // Глобальный объект для хранения динамических данных (status, wineDetails)
+        window.tanksData = {}; 
+        // Глобальный массив для хранения конфигурации (id, volume). Фиксированный размер 100.
+        window.tanksConfig = []; 
+        
         window.currentTankId = null;
         window.currentFilter = 'all'; 
         
-        // Ключ для localStorage
-        const STORAGE_KEY = 'WINE_TANK_DATA_V2';
+        // Ключи для localStorage
+        const DATA_STORAGE_KEY = 'WINE_TANK_DATA_V2';
+        const CONFIG_STORAGE_KEY = 'WINE_TANK_CONFIG_V1';
         
-        // Определяем список емкостей для отображения на плане: от 1 до 100
-        const TANK_IDS = Array.from({ length: 100 }, (_, i) => (i + 1).toString());
+        // --- Утилиты для Конфигурации ---
 
-        // --- Утилиты ---
-
-        /** Определяет номинальный объем Tank'а на основе его ID. */
-        function getTankVolume(id) {
-            const tankId = parseInt(id, 10);
-            if (tankId >= 1 && tankId <= 25) {
-                return '5,000 L';
-            } else if (tankId > 25 && tankId <= 75) {
-                return '15,000 L';
-            } else if (tankId > 75 && tankId <= 100) {
-                return '25,000 L';
+        /** Генерирует 100 Tank'ов по умолчанию (ID 1-100, Volumen 5,000 L) */
+        function generateDefaultConfig() {
+            const defaultConfig = [];
+            for (let i = 1; i <= 100; i++) {
+                defaultConfig.push({
+                    position: i.toString(), // Фиксированная позиция в массиве (для рендеринга)
+                    id: i.toString(),      // Фактический номер Tank'а (может быть изменен)
+                    volume: '5,000 L'      // Объем (может быть изменен)
+                });
             }
-            return 'N/A';
+            return defaultConfig;
+        }
+
+        /** Загружает конфигурацию Tank'ов из localStorage */
+        function loadConfigFromStorage() {
+            try {
+                const storedConfig = localStorage.getItem(CONFIG_STORAGE_KEY);
+                return storedConfig ? JSON.parse(storedConfig) : generateDefaultConfig();
+            } catch (e) {
+                console.error("Fehler beim Laden der Tank-Konfiguration:", e);
+                return generateDefaultConfig();
+            }
+        }
+
+        /** Сохраняет текущую конфигурацию Tank'ов в localStorage */
+        function saveConfigToStorage() {
+            try {
+                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(window.tanksConfig));
+            } catch (e) {
+                console.error("Fehler beim Speichern der Tank-Konfiguration:", e);
+                window.showMessage('Fehler beim Speichern der Konfiguration lokal.', 'error');
+            }
+        }
+
+        /** Возвращает объект конфигурации Tank'а по его Tank-ID */
+        function getTankConfigById(id) {
+            return window.tanksConfig.find(c => c.id === id);
         }
         
+        // --- Утилиты для динамических данных ---
+
+        /** Загружает динамические данные Tank'ов из localStorage */
+        function loadTanksFromStorage() {
+            try {
+                const storedData = localStorage.getItem(DATA_STORAGE_KEY);
+                return storedData ? JSON.parse(storedData) : {};
+            } catch (e) {
+                console.error("Fehler beim Laden der dynamischen Daten aus localStorage:", e);
+                return {};
+            }
+        }
+
+        /** Сохраняет текущие динамические данные Tank'ов в localStorage */
+        function saveTanksToStorage() {
+            try {
+                // Удаляем старые/ненужные поля для чистоты
+                const dataToSave = JSON.parse(JSON.stringify(window.tanksData));
+                Object.keys(dataToSave).forEach(id => {
+                    if (dataToSave[id].isFull !== undefined) delete dataToSave[id].isFull;
+                });
+                localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(dataToSave));
+            } catch (e) {
+                console.error("Fehler beim Speichern der dynamischen Daten in localStorage:", e);
+                window.showMessage('Fehler beim Speichern der Daten lokal.', 'error');
+            }
+        }
+
         /** Показывает сообщение на экране вместо alert() */
         window.showMessage = function(message, type = 'success') {
             const box = document.getElementById('message-box');
@@ -161,7 +223,7 @@
             let bgColor = 'bg-green-500';
             if (type === 'error') bgColor = 'bg-red-500';
             else if (type === 'info') bgColor = 'bg-blue-500';
-            else if (type === 'warning') bgColor = 'bg-orange-500'; // Используем оранжевый для warning/reserved
+            else if (type === 'warning') bgColor = 'bg-orange-500';
 
             box.classList.add(bgColor);
             
@@ -172,190 +234,31 @@
                 setTimeout(() => box.classList.add('hidden'), 300); 
             }, 3000);
         }
-
-        /** Обновляет модальное окно в зависимости от статуса Tank'а */
-        window.openModal = function(tankId) {
-            window.currentTankId = tankId;
-            const tank = window.tanksData[tankId];
-            const title = document.getElementById('modal-title');
-            const content = document.getElementById('modal-content');
-            const modal = document.getElementById('modal');
-            const volume = getTankVolume(tankId);
-
-            title.textContent = `Tank Nr.${tankId} (${volume})`;
-            content.innerHTML = ''; 
-            
-            if (!tank || !tank.status) {
-                content.innerHTML = '<p class="text-red-600 font-semibold">Daten für diesen Tank konnten nicht geladen werden.</p>';
-            } else {
-                let htmlContent = '';
-                const currentStatus = tank.status;
-
-                // Информация о вине (для заполненных и "к опустошению" статусов)
-                const wineInfoHtml = (tank.wineDetails && (currentStatus === 'full' || currentStatus === 'to_be_emptied')) ? `
-                    <div class="space-y-3 mt-4 p-4 border rounded-lg bg-gray-50">
-                        <p class="text-sm font-semibold text-gray-700">Wein-Details:</p>
-                        <p><span class="font-medium text-gray-600">Jahrgang:</span> ${tank.wineDetails.year || 'N/A'}</p>
-                        <p><span class="font-medium text-gray-600">Rebsorte:</span> ${tank.wineDetails.variety || 'N/A'}</p>
-                        <p><span class="font-medium text-gray-600">Qualität:</span> ${tank.wineDetails.quality || 'N/A'}</p>
-                        <p class="text-xs text-gray-500 pt-2">Hinzugefügt: ${new Date(tank.wineDetails.addedAt).toLocaleString('de-DE')}</p>
-                    </div>
-                ` : '';
-
-                switch (currentStatus) {
-                    case 'full':
-                    case 'to_be_emptied':
-                        const statusText = currentStatus === 'full' 
-                            ? `<span class="text-red-600 font-bold">Gefüllt</span>` 
-                            : `<span class="text-blue-600 font-bold">Wird Leer</span>`;
-                        
-                        const actionButton = currentStatus === 'full' 
-                            ? `<button onclick="markForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition duration-150 shadow-md">Für Entleerung vormerken (Blau)</button>`
-                            : `
-                              <button onclick="undoMarkForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Markierung Rückgängig (Rot)</button>
-                              <button onclick="emptyTank('${tankId}')" class="w-full mt-2 px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition duration-150 shadow-md">Tank jetzt leeren (Grün)</button>
-                            `;
-
-                        htmlContent = `
-                            <p class="mb-4"><span class="font-semibold">Status:</span> ${statusText}</p>
-                            ${wineInfoHtml}
-                            ${actionButton}
-                        `;
-                        break;
-
-                    case 'empty':
-                    case 'reserved':
-                        const isReserved = currentStatus === 'reserved';
-                        let formTitle;
-                        let formButtons;
-                        let reserveButtonExternal = '';
-                        
-                        // --- Vordefinierte Details aus Reservierung laden ---
-                        const currentDetails = tank.wineDetails || {};
-                        const prefilledYear = currentDetails.year || new Date().getFullYear();
-                        const prefilledVariety = currentDetails.variety || '';
-                        const prefilledQuality = currentDetails.quality || 'Gutswein';
-
-
-                        // --- Formularfelder (Rebsorte ist immer required) ---
-                        const formFields = `
-                            <div class="mb-3">
-                                <label for="wine-year" class="block text-sm font-medium text-gray-700">Jahrgang (JJJJ)</label>
-                                <input type="number" id="wine-year" name="year" required min="1900" max="${new Date().getFullYear()}" value="${prefilledYear}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
-                            </div>
-                            <div class="mb-3">
-                                <label for="wine-variety" class="block text-sm font-medium text-gray-700">Rebsorte <span class="text-red-500">*</span></label>
-                                <input type="text" id="wine-variety" name="variety" required placeholder="Z.B. Cabernet Sauvignon" value="${prefilledVariety}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
-                            </div>
-                            <div class="mb-4">
-                                <label for="wine-quality" class="block text-sm font-medium text-gray-700">Qualität (Klassifikation)</label>
-                                <select id="wine-quality" name="quality" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
-                                    <option value="Gutswein" ${prefilledQuality === 'Gutswein' ? 'selected' : ''}>Gutswein</option>
-                                    <option value="Edition C" ${prefilledQuality === 'Edition C' ? 'selected' : ''}>Edition C</option>
-                                    <option value="Edition S" ${prefilledQuality === 'Edition S' ? 'selected' : ''}>Edition S</option>
-                                    <option value="Edition P" ${prefilledQuality === 'Edition P' ? 'selected' : ''}>Edition P</option>
-                                    <option value="Edition Federle" ${prefilledQuality === 'Edition Federle' ? 'selected' : ''}>Edition Federle</option>
-                                    <option value="QbA" ${prefilledQuality === 'QbA' ? 'selected' : ''}>QbA</option>
-                                    <option value="Auslese" ${prefilledQuality === 'Auslese' ? 'selected' : ''}>Auslese</option>
-                                </select>
-                            </div>
-                        `;
-
-                        if (isReserved) {
-                            // RESERVIERT (Gelb) - Фокус на заполнении -> ROT
-                            formTitle = `<p class="mb-4 text-yellow-700 font-bold">RESERVIERT für ${prefilledVariety}. Daten überprüfen und zum Füllen bereit.</p>`;
-                            formButtons = `
-                                <button type="submit" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition duration-150 shadow-md text-lg" data-target-status="full">Füllen & Status auf ROT setzen</button>
-                            `;
-                            // Отдельная кнопка для отмены резервирования
-                            reserveButtonExternal = `<button onclick="unreserveTank('${tankId}')" class="w-full mt-3 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Reservierung aufheben (Grün)</button>`;
-
-                        } else {
-                            // LEER (Grün) - Фокус на заполнении -> ROT или резервировании -> GELB
-                            formTitle = `<p class="mb-4 text-green-600 font-bold">Leer. Geben Sie die Weindaten ein, um den Tank zu füllen oder zu reservieren.</p>`;
-                            formButtons = `
-                                <button type="submit" class="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition duration-150 shadow-md text-lg" data-target-status="full">Wein hinzufügen & füllen (Rot)</button>
-                                <button type="submit" class="w-full mt-3 px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition duration-150 shadow-md" data-target-status="reserved">Tank reservieren (Gelb)</button>
-                            `;
-                        }
-
-                        htmlContent = `
-                            ${formTitle}
-                            <form id="wine-action-form" onsubmit="event.preventDefault(); handleWineAction(event)">
-                                ${formFields}
-                                ${formButtons}
-                            </form>
-                            ${reserveButtonExternal}
-                        `;
-                        break;
-                }
-                content.innerHTML = htmlContent;
-            }
-
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-        }
-
-        /** Закрывает модальное окно */
-        window.closeModal = function() {
-            document.getElementById('modal').classList.add('hidden');
-            document.getElementById('modal').classList.remove('flex');
-            window.currentTankId = null;
-        }
-
-        // --- Логика localStorage ---
-
-        /** Загружает данные Tanks'ов из localStorage */
-        function loadTanksFromStorage() {
-            try {
-                const storedData = localStorage.getItem(STORAGE_KEY);
-                return storedData ? JSON.parse(storedData) : {};
-            } catch (e) {
-                console.error("Fehler beim Laden der Daten aus localStorage:", e);
-                return {};
-            }
-        }
-
-        /** Сохраняет текущие данные Tanks'ов в localStorage */
-        function saveTanksToStorage() {
-            try {
-                // Перед сохранением удаляем старые поля, если они присутствуют (для чистоты)
-                const dataToSave = JSON.parse(JSON.stringify(window.tanksData));
-                Object.keys(dataToSave).forEach(id => {
-                    if (dataToSave[id].isFull !== undefined) {
-                        delete dataToSave[id].isFull;
-                    }
-                });
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-            } catch (e) {
-                console.error("Fehler beim Speichern der Daten in localStorage:", e);
-                window.showMessage('Fehler beim Speichern der Daten lokal.', 'error');
-            }
-        }
-
-        /** Инициализация хранилища: загрузка данных и заполнение недостающих Tanks'ов */
+        
+        /** Инициализация хранилища: загрузка конфигурации и динамических данных */
         function initializeStorageAndDisplay() {
+            // 1. Загрузка/Генерация Конфигурации
+            window.tanksConfig = loadConfigFromStorage();
+            
+            // 2. Загрузка Динамического Состояния
             const loadedData = loadTanksFromStorage();
-            let needsUpdate = false;
+            
+            // Используем ID из конфигурации для инициализации состояния
+            const configTankIds = window.tanksConfig.map(c => c.id);
 
-            TANK_IDS.forEach(id => {
+            let needsUpdate = false;
+            window.tanksData = {}; // Сброс карты данных
+
+            configTankIds.forEach(id => {
                 let tank = loadedData[id];
 
                 if (tank) {
-                    // Конвертация старого формата (isFull) в новый (status)
-                    if (tank.isFull !== undefined) {
-                        tank.status = tank.isFull ? 'full' : 'empty';
-                        delete tank.isFull;
-                        needsUpdate = true;
-                    }
-                    // Установка статуса по умолчанию, если он отсутствует
-                    if (!tank.status) {
-                        tank.status = 'empty';
-                        needsUpdate = true;
-                    }
+                    // Используем существующее состояние, очищаем старые свойства
+                    if (tank.isFull !== undefined) delete tank.isFull;
+                    if (!tank.status) tank.status = 'empty';
                     window.tanksData[id] = tank;
                 } else {
-                    // Инициализация нового Tank'а
+                    // Инициализируем новый Tank, если его ID есть в конфигурации, но нет в данных
                     window.tanksData[id] = {
                         id: id,
                         status: 'empty',
@@ -365,12 +268,297 @@
                 }
             });
 
+            // Note: Stale data (old IDs not in config) will be ignored on display/load
+            // and remains in storage until explicitly cleaned, which is acceptable.
+
             if (needsUpdate) {
                 saveTanksToStorage();
             }
             
+            // 3. Обновление UI
+            renderInitialPlan();
             updateTankDisplay();
         }
+
+
+        // --- Логика Модального окна (Общая) ---
+
+        /** Закрывает модальное окно */
+        window.closeModal = function() {
+            document.getElementById('modal').classList.add('hidden');
+            document.getElementById('modal').classList.remove('flex');
+            // Очищаем форму конфигурации, если она была открыта
+            const configForm = document.getElementById('config-form');
+            if (configForm) configForm.remove();
+
+            window.currentTankId = null;
+        }
+
+        /** Открывает модальное окно */
+        function openGenericModal(title, contentHtml, footerHtml) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-content').innerHTML = contentHtml;
+            document.getElementById('modal-footer').innerHTML = footerHtml;
+            document.getElementById('modal').classList.remove('hidden');
+            document.getElementById('modal').classList.add('flex');
+
+            // Устанавливаем ширину для окна Tank Details
+            if (title.startsWith('Tank Nr.')) {
+                document.getElementById('modal-container').classList.remove('max-w-4xl');
+                document.getElementById('modal-container').classList.add('max-w-md');
+            } 
+            // Устанавливаем ширину для окна Конфигурации
+            else if (title === 'Tank-Konfiguration') {
+                document.getElementById('modal-container').classList.remove('max-w-md');
+                document.getElementById('modal-container').classList.add('max-w-4xl');
+            }
+        }
+
+
+        // --- Логика Tank Configuration ---
+
+        /** Открывает модальное окно для конфигурации Tank'ов */
+        window.openConfigModal = function() {
+            const config = window.tanksConfig;
+            let tableRows = '';
+
+            config.forEach(item => {
+                // Примечание: position (1-100) - это фиксированный индекс массива.
+                // id - это номер Tank'а, который может меняться.
+                tableRows += `
+                    <tr class="hover:bg-gray-50 border-t">
+                        <td class="px-2 py-2 text-sm text-gray-500">${item.position}</td>
+                        <td class="px-2 py-2">
+                            <input type="text" name="id_${item.position}" value="${item.id}" required 
+                                class="w-full border border-gray-300 rounded-md shadow-sm p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500 font-semibold" 
+                                pattern="[A-Za-z0-9-]+" title="Nur Buchstaben, Zahlen und Bindestriche erlaubt">
+                        </td>
+                        <td class="px-2 py-2">
+                            <input type="text" name="volume_${item.position}" value="${item.volume}" required 
+                                class="w-full border border-gray-300 rounded-md shadow-sm p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                        </td>
+                    </tr>
+                `;
+            });
+
+            const contentHtml = `
+                <form id="config-form" onsubmit="event.preventDefault(); saveConfigChanges(event)" class="space-y-4">
+                    <p class="text-sm text-gray-600">Bearbeiten Sie die ID (Tank Nr.) und das Volumen für jede Tank-Position (1-100). Speichern Sie, um die Änderungen zu übernehmen.</p>
+                    <div class="overflow-y-auto max-h-[60vh] border rounded-lg">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50 sticky top-0">
+                                <tr>
+                                    <th class="px-2 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Pos.</th>
+                                    <th class="px-2 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-3/6">Tank ID / Nr.</th>
+                                    <th class="px-2 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-2/6">Volumen</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${tableRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </form>
+            `;
+
+            const footerHtml = `
+                <button type="submit" form="config-form" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 mr-2">Konfiguration speichern</button>
+                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Abbrechen</button>
+            `;
+            
+            openGenericModal('Tank-Konfiguration', contentHtml, footerHtml);
+        }
+
+        /** Сохраняет изменения конфигурации */
+        window.saveConfigChanges = function(event) {
+            const form = event.target;
+            const newConfig = [];
+            const newIds = [];
+            let hasError = false;
+
+            for (const item of window.tanksConfig) {
+                const newId = form.elements[`id_${item.position}`].value.trim();
+                const newVolume = form.elements[`volume_${item.position}`].value.trim();
+
+                // Проверка на дублирование ID
+                if (newIds.includes(newId)) {
+                    window.showMessage(`Fehler: Die Tank ID "${newId}" ist dupliziert.`, 'error');
+                    hasError = true;
+                    break;
+                }
+                newIds.push(newId);
+
+                newConfig.push({
+                    position: item.position,
+                    id: newId,
+                    volume: newVolume
+                });
+            }
+
+            if (hasError) return;
+
+            // 1. Обновление tanksConfig
+            window.tanksConfig = newConfig;
+            saveConfigToStorage();
+
+            // 2. Обновление tanksData: сохраняем старые данные, но по новым ключам, если ID изменился.
+            // Старые ID, которые больше не существуют, удаляются из tanksData.
+            const oldData = JSON.parse(JSON.stringify(window.tanksData));
+            const newTankData = {};
+            
+            // Если Tank ID изменился, нам нужно перенести его данные (status, wineDetails)
+            window.tanksConfig.forEach(config => {
+                const oldId = window.tanksData[config.id]?.id || config.id; // Пытаемся найти старый ID (если он есть)
+
+                // Если новый ID совпадает со старым, просто используем данные
+                if (oldData[config.id]) {
+                    newTankData[config.id] = oldData[config.id];
+                    newTankData[config.id].id = config.id; // Убеждаемся, что ID в данных актуален
+                } 
+                // В данном случае, так как мы редактируем только ID и Volume, 
+                // и не знаем, какой старый ID соответствует новому ID в этой позиции, 
+                // мы просто используем старые данные по этому ID, если они существуют.
+                else if (oldData[oldId]) { // Fallback, не гарантирует корректность переноса
+                     newTankData[config.id] = { ...oldData[oldId], id: config.id, status: 'empty', wineDetails: null };
+                }
+                // Иначе - создаем новый пустой Tank
+                else {
+                    newTankData[config.id] = { id: config.id, status: 'empty', wineDetails: null };
+                }
+            });
+
+            window.tanksData = newTankData;
+            saveTanksToStorage();
+
+
+            // 3. Обновление UI
+            closeModal();
+            renderInitialPlan();
+            updateTankDisplay();
+            window.showMessage('Tank-Konfiguration erfolgreich gespeichert und angewendet!', 'success');
+        }
+
+        // --- Логика Tank Details (Модальное окно Tank'а) ---
+
+        /** Обновляет модальное окно в зависимости от статуса Tank'а */
+        window.openTankDetailsModal = function(tankId) {
+            window.currentTankId = tankId;
+            const tank = window.tanksData[tankId];
+            const config = getTankConfigById(tankId);
+            const volume = config ? config.volume : 'N/A';
+            
+            if (!tank || !tank.status || !config) {
+                const content = '<p class="text-red-600 font-semibold">Daten für diesen Tank konnten nicht geladen werden.</p>';
+                openGenericModal(`Tank Nr.${tankId} (${volume})`, content, `<button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`);
+                return;
+            }
+
+            let htmlContent = '';
+            const currentStatus = tank.status;
+
+            // Информация о вине (для заполненных и "к опустошению" статусов)
+            const wineInfoHtml = (tank.wineDetails && (currentStatus === 'full' || currentStatus === 'to_be_emptied' || currentStatus === 'reserved')) ? `
+                <div class="space-y-3 mt-4 p-4 border rounded-lg bg-gray-50">
+                    <p class="text-sm font-semibold text-gray-700">Wein-Details:</p>
+                    <p><span class="font-medium text-gray-600">Jahrgang:</span> ${tank.wineDetails.year || 'N/A'}</p>
+                    <p><span class="font-medium text-gray-600">Rebsorte:</span> ${tank.wineDetails.variety || 'N/A'}</p>
+                    <p><span class="font-medium text-gray-600">Qualität:</span> ${tank.wineDetails.quality || 'N/A'}</p>
+                    ${tank.wineDetails.addedAt ? `<p class="text-xs text-gray-500 pt-2">Hinzugefügt: ${new Date(tank.wineDetails.addedAt).toLocaleString('de-DE')}</p>` : ''}
+                </div>
+            ` : '';
+
+            let footerHtml = '';
+
+            switch (currentStatus) {
+                case 'full':
+                case 'to_be_emptied':
+                    const statusText = currentStatus === 'full' 
+                        ? `<span class="text-red-600 font-bold">Gefüllt</span>` 
+                        : `<span class="text-blue-600 font-bold">Wird Leer</span>`;
+                    
+                    const actionButton = currentStatus === 'full' 
+                        ? `<button onclick="markForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition duration-150 shadow-md">Für Entleerung vormerken (Blau)</button>`
+                        : `
+                          <button onclick="undoMarkForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Markierung Rückgängig (Rot)</button>
+                          <button onclick="emptyTank('${tankId}')" class="w-full mt-2 px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition duration-150 shadow-md">Tank jetzt leeren (Grün)</button>
+                        `;
+
+                    htmlContent = `<p class="mb-4"><span class="font-semibold">Status:</span> ${statusText}</p>${wineInfoHtml}`;
+                    footerHtml = `${actionButton}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
+                    break;
+
+                case 'empty':
+                case 'reserved':
+                    const isReserved = currentStatus === 'reserved';
+                    let formTitle;
+                    let formButtons;
+                    let reserveButtonExternal = '';
+                    
+                    // --- Vordefinierte Details aus Reservierung laden ---
+                    const currentDetails = tank.wineDetails || {};
+                    const prefilledYear = currentDetails.year || new Date().getFullYear();
+                    const prefilledVariety = currentDetails.variety || '';
+                    const prefilledQuality = currentDetails.quality || 'Gutswein';
+
+
+                    // --- Formularfelder (Rebsorte ist immer required) ---
+                    const formFields = `
+                        <div class="mb-3">
+                            <label for="wine-year" class="block text-sm font-medium text-gray-700">Jahrgang (JJJJ)</label>
+                            <input type="number" id="wine-year" name="year" required min="1900" max="${new Date().getFullYear()}" value="${prefilledYear}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div class="mb-3">
+                            <label for="wine-variety" class="block text-sm font-medium text-gray-700">Rebsorte <span class="text-red-500">*</span></label>
+                            <input type="text" id="wine-variety" name="variety" required placeholder="Z.B. Cabernet Sauvignon" value="${prefilledVariety}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div class="mb-4">
+                            <label for="wine-quality" class="block text-sm font-medium text-gray-700">Qualität (Klassifikation)</label>
+                            <select id="wine-quality" name="quality" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="Gutswein" ${prefilledQuality === 'Gutswein' ? 'selected' : ''}>Gutswein</option>
+                                <option value="Edition C" ${prefilledQuality === 'Edition C' ? 'selected' : ''}>Edition C</option>
+                                <option value="Edition S" ${prefilledQuality === 'Edition S' ? 'selected' : ''}>Edition S</option>
+                                <option value="Edition P" ${prefilledQuality === 'Edition P' ? 'selected' : ''}>Edition P</option>
+                                <option value="Edition Federle" ${prefilledQuality === 'Edition Federle' ? 'selected' : ''}>Edition Federle</option>
+                                <option value="QbA" ${prefilledQuality === 'QbA' ? 'selected' : ''}>QbA</option>
+                                <option value="Auslese" ${prefilledQuality === 'Auslese' ? 'selected' : ''}>Auslese</option>
+                            </select>
+                        </div>
+                    `;
+
+                    if (isReserved) {
+                        // RESERVIERT (Gelb) - Фокус на заполнении -> ROT
+                        formTitle = `<p class="mb-4 text-yellow-700 font-bold">RESERVIERT für ${prefilledVariety}. Daten überprüfen und zum Füllen bereit.</p>`;
+                        formButtons = `
+                            <button type="submit" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition duration-150 shadow-md text-lg" data-target-status="full">Füllen & Status auf ROT setzen</button>
+                        `;
+                        // Отдельная кнопка для отмены резервирования
+                        reserveButtonExternal = `<button onclick="unreserveTank('${tankId}')" class="w-full mt-3 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Reservierung aufheben (Grün)</button>`;
+
+                    } else {
+                        // LEER (Grün) - Фокус на заполнении -> ROT или резервировании -> GELB
+                        formTitle = `<p class="mb-4 text-green-600 font-bold">Leer. Geben Sie die Weindaten ein, um den Tank zu füllen oder zu reservieren.</p>`;
+                        formButtons = `
+                            <button type="submit" class="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition duration-150 shadow-md text-lg" data-target-status="full">Wein hinzufügen & füllen (Rot)</button>
+                            <button type="submit" class="w-full mt-3 px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition duration-150 shadow-md" data-target-status="reserved">Tank reservieren (Gelb)</button>
+                        `;
+                    }
+
+                    htmlContent = `
+                        ${formTitle}
+                        <form id="wine-action-form" onsubmit="event.preventDefault(); handleWineAction(event)">
+                            ${formFields}
+                            ${formButtons}
+                        </form>
+                    `;
+                    footerHtml = `${reserveButtonExternal}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
+
+                    break;
+            }
+            
+            openGenericModal(`Tank Nr.${tankId} (${volume})`, htmlContent, footerHtml);
+        }
+
+        // --- Логика Обновления Tank'ов ---
 
         /** Обновляет стили кнопок фильтрации */
         function updateFilterButtons(activeFilter) {
@@ -386,7 +574,9 @@
 
         /** Обновление внешнего вида Tanks'ов на плане (включая фильтрацию) */
         function updateTankDisplay() {
-            TANK_IDS.forEach(id => {
+            // Используем tanksConfig для итерации
+            window.tanksConfig.forEach(config => {
+                const id = config.id;
                 const tankElement = document.querySelector(`.tank[data-id="${id}"]`);
                 const data = window.tanksData[id];
 
@@ -401,7 +591,7 @@
                         // Применение цветового класса
                         tankElement.classList.add(`tank-${status.replace(/_/g, '-')}`);
                     } else {
-                        // Обработка ошибки конфигурации
+                        // Обработка ошибки конфигурации (если нет динамических данных)
                         tankElement.classList.add('config-error');
                     }
 
@@ -419,6 +609,16 @@
                     
                     // Применение видимости
                     tankElement.style.display = isVisible ? 'flex' : 'none';
+                    
+                    // Обновление отображаемых ID и Volume на случай, если они были изменены в Konfiguration
+                    tankElement.querySelector('.text-xl').textContent = id;
+                    tankElement.querySelector('.text-xs').textContent = config.volume;
+
+                    // Обновляем data-id для правильной обработки кликов
+                    tankElement.setAttribute('data-id', id);
+
+                } else {
+                    // Если TankElement отсутствует, нужно перерисовать весь план (что делается в renderInitialPlan)
                 }
             });
             
@@ -442,16 +642,16 @@
         }
 
 
-        // --- Новые и обновленные функции действий ---
+        // --- Функции действий (Status-Wechsel) ---
 
         /** Универсальная функция обновления статуса */
         function updateTankStatus(tankId, newStatus, message) {
-            if (!tankId) return window.showMessage('Fehler: Tank-ID fehlt.', 'error');
+            if (!tankId || !window.tanksData[tankId]) return window.showMessage('Fehler: Tank-ID fehlt oder ist ungültig.', 'error');
 
             // 1. Обновление данных в памяти
             window.tanksData[tankId].status = newStatus;
             
-            // Если статус не 'full' или 'to_be_emptied', удаляем детали о вине
+            // Если статус не 'full' или 'to_be_emptied', удаляем детали о вине/резервировании
             if (newStatus !== 'full' && newStatus !== 'to_be_emptied') {
                 window.tanksData[tankId].wineDetails = null;
             }
@@ -462,7 +662,7 @@
             // 3. Обновление UI
             updateTankDisplay();
 
-            window.showMessage(message, 'success');
+            window.showMessage(message, newStatus === 'reserved' ? 'warning' : 'success');
         }
 
         /** Отмена резервирования (reserved -> empty) */
@@ -474,7 +674,6 @@
         /** Отметка для опустошения (full -> to_be_emptied) */
         window.markForEmptying = function(tankId) {
             window.closeModal();
-            // Детали о вине сохраняются, так как он еще полон
             updateTankStatus(tankId, 'to_be_emptied', `Tank ${tankId} als "Wird Leer" vorgemerkt.`);
         }
         
@@ -494,24 +693,21 @@
                 return;
             }
             
-            // Находим нажатую кнопку-отправителя
             const submitter = event.submitter;
             const targetStatus = submitter.getAttribute('data-target-status');
 
-            // Собираем данные формы
             const year = form.elements['year'].value;
-            const variety = form.elements['variety'].value; // Обязательное поле
+            const variety = form.elements['variety'].value.trim(); // Обязательное поле
             const quality = form.elements['quality'].value;
 
             // Проверка обязательного поля Rebsorte 
-            if (!variety.trim()) {
+            if (!variety) {
                 window.showMessage('Fehler: Rebsorte ist ein Pflichtfeld!', 'error');
                 return;
             }
 
             window.closeModal();
 
-            // Детали вина, которые сохраняются
             const wineDetails = {
                 year: parseInt(year, 10),
                 variety: variety,
@@ -522,7 +718,7 @@
             // 1. Обновление данных в памяти
             window.tanksData[tankId] = {
                 id: tankId,
-                status: targetStatus, // 'full' (Красный) или 'reserved' (Желтый)
+                status: targetStatus, 
                 wineDetails: wineDetails
             };
             
@@ -547,15 +743,18 @@
 
         // --- Рендеринг плана ---
 
-        /** Инициализация и рендеринг DOM элементов бочек/Tanks'ов */
+        /** Инициализация и рендеринг DOM элементов Tanks'ов */
         function renderInitialPlan() {
             const container = document.getElementById('plan-container');
             container.innerHTML = ''; 
 
-            TANK_IDS.forEach(id => {
-                const volume = getTankVolume(id);
+            // Tank'и рендерятся в порядке их позиции (1-100), используя их настроенные ID и Volume
+            window.tanksConfig.forEach(config => {
+                const id = config.id;
+                const volume = config.volume;
+
                 const tankDiv = document.createElement('div');
-                // Начальный класс: config-error будет заменен на реальный статус в updateTankDisplay
+                // Мы используем data-id как фактический Tank ID для поиска в tanksData
                 tankDiv.className = 'tank config-error'; 
                 tankDiv.setAttribute('data-id', id);
                 
@@ -564,14 +763,13 @@
                     <div class="text-xs font-normal opacity-90 leading-none mt-1">${volume}</div>
                 `;
 
-                tankDiv.onclick = () => window.openModal(id);
+                tankDiv.onclick = () => window.openTankDetailsModal(id);
                 container.appendChild(tankDiv);
             });
         }
 
         // Запуск приложения
         window.onload = function() {
-            renderInitialPlan();
             initializeStorageAndDisplay();
         };
     </script>
