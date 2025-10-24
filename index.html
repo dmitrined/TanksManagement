@@ -1,419 +1,567 @@
 <!DOCTYPE html>
 <html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wein-Tank-Management (Synchronisiert)</title>
     <!-- Подключение Tailwind CSS для стилей -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Firebase Imports (ОБЯЗАТЕЛЬНЫЕ) -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        // ИСПРАВЛЕНО: setLogLevel удален из импорта firebase-auth.js
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      // ИСПРАВЛЕНО: setLogLevel удален из импорта firebase-auth.js
+      import {
+        getAuth,
+        signInAnonymously,
+        signInWithCustomToken,
+        onAuthStateChanged,
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+      import {
+        getFirestore,
+        doc,
+        setDoc,
+        onSnapshot,
+        updateDoc,
+        writeBatch,
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Глобальные переменные для доступа в скрипте ниже
-        // ИСПРАВЛЕНО: setLogLevel удален из глобального объекта window.firebase
-        window.firebase = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, updateDoc, writeBatch };
+      // Глобальные переменные для доступа в скрипте ниже
+      // ИСПРАВЛЕНО: setLogLevel удален из глобального объекта window.firebase
+      window.firebase = {
+        initializeApp,
+        getAuth,
+        signInAnonymously,
+        signInWithCustomToken,
+        onAuthStateChanged,
+        getFirestore,
+        doc,
+        setDoc,
+        onSnapshot,
+        updateDoc,
+        writeBatch,
+      };
     </script>
-    
+
     <style>
-        /* Стиль для шрифта Inter */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6;
-        }
+      /* Стиль для шрифта Inter */
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #f3f4f6;
+      }
 
-        /* Основной контейнер плана - адаптивная сетка */
-        #plan-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 10px;
-            width: 95%;
-            max-width: 1200px;
-            margin: 20px auto;
-            border: 1px solid #d1d5db;
-            background-color: #fff;
-            padding: 16px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            border-radius: 12px;
-        }
+      /* Основной контейнер плана - адаптивная сетка */
+      #plan-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
+        width: 95%;
+        max-width: 1200px;
+        margin: 20px auto;
+        border: 1px solid #d1d5db;
+        background-color: #fff;
+        padding: 16px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border-radius: 12px;
+      }
 
-        /* Стиль для отдельной бочки/емкости */
-        .tank {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 60px;
-            color: #fff;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease-in-out;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            border: none;
-            padding: 5px;
-            text-shadow: 0 0 3px rgba(0,0,0,0.4);
-        }
+      /* Стиль для отдельной бочки/емкости */
+      .tank {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 60px;
+        color: #fff;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease-in-out;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        border: none;
+        padding: 5px;
+        text-shadow: 0 0 3px rgba(0, 0, 0, 0.4);
+      }
 
-        .tank:hover {
-            opacity: 0.9;
-            transform: scale(1.03);
-            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.2);
-            z-index: 10;
-        }
+      .tank:hover {
+        opacity: 0.9;
+        transform: scale(1.03);
+        box-shadow: 0 6px 10px rgba(0, 0, 0, 0.2);
+        z-index: 10;
+      }
 
-        /* Цветовая кодировка */
-        .tank-full {
-            background-color: #dc2626; /* Красный: Gefüllt */
-        }
-        .tank-empty {
-            background-color: #10b981; /* Зеленый: Leer */
-        }
-        .tank-reserved {
-            background-color: #f59e0b; /* Желтый: Reserviert */
-            color: #1f2937; /* Темный текст для контраста */
-            text-shadow: none;
-        }
-        .tank-to-be-emptied {
-            background-color: #3b82f6; /* Синий: Wird Leer */
-        }
-        /* Стиль для ошибки в инпуте конфигурации */
-        .config-error {
-            background-color: #fef2f2 !important;
-            border-color: #fca5a5 !important;
-            color: #ef4444 !important;
-        }
+      /* Цветовая кодировка */
+      .tank-full {
+        background-color: #dc2626; /* Красный: Gefüllt */
+      }
+      .tank-empty {
+        background-color: #10b981; /* Зеленый: Leer */
+      }
+      .tank-reserved {
+        background-color: #f59e0b; /* Желтый: Reserviert */
+        color: #1f2937; /* Темный текст для контраста */
+        text-shadow: none;
+      }
+      .tank-to-be-emptied {
+        background-color: #3b82f6; /* Синий: Wird Leer */
+      }
+      /* Стиль для ошибки в инпуте конфигурации */
+      .config-error {
+        background-color: #fef2f2 !important;
+        border-color: #fca5a5 !important;
+        color: #ef4444 !important;
+      }
     </style>
-</head>
-<body class="p-4">
-
+  </head>
+  <body class="p-4">
     <!-- Заголовок и управление конфигурацией -->
     <header class="text-center mb-6">
-        <h1 class="text-3xl font-bold text-gray-800">Wein-Tank-Management</h1>
-        
-        <div class="flex flex-col sm:flex-row justify-center items-center mt-2 space-y-2 sm:space-y-0 sm:space-x-4">
-            <!-- ОБНОВЛЕНО: Статус для Firestore -->
-            <p id="auth-status" class="text-sm text-gray-600">Status: Wird geladen...</p>
-            <button onclick="openConfigModal()" class="px-3 py-1 bg-indigo-500 text-white text-sm rounded-lg font-semibold hover:bg-indigo-600 transition duration-150 shadow-md">
-                Tank-Konfiguration
-            </button>
-        </div>
+      <h1 class="text-3xl font-bold text-gray-800">Wein-Tank-Management</h1>
 
-        <p class="text-xs text-gray-500 mt-3">
-            <span class="text-green-600 font-bold">Grün</span>: Leer | 
-            <span class="text-red-600 font-bold">Rot</span>: Gefüllt | 
-            <span class="text-yellow-600 font-bold">Gelb</span>: Reserviert | 
-            <span class="text-blue-600 font-bold">Blau</span>: Wird Leer. 
-            Zum Verwalten antippen.
+      <div
+        class="flex flex-col sm:flex-row justify-center items-center mt-2 space-y-2 sm:space-y-0 sm:space-x-4"
+      >
+        <!-- ОБНОВЛЕНО: Статус для Firestore -->
+        <p id="auth-status" class="text-sm text-gray-600">
+          Status: Wird geladen...
         </p>
+        <button
+          onclick="openConfigModal()"
+          class="px-3 py-1 bg-indigo-500 text-white text-sm rounded-lg font-semibold hover:bg-indigo-600 transition duration-150 shadow-md"
+        >
+          Tank-Konfiguration
+        </button>
+      </div>
+
+      <p class="text-xs text-gray-500 mt-3">
+        <span class="text-green-600 font-bold">Grün</span>: Leer |
+        <span class="text-red-600 font-bold">Rot</span>: Gefüllt |
+        <span class="text-yellow-600 font-bold">Gelb</span>: Reserviert |
+        <span class="text-blue-600 font-bold">Blau</span>: Wird Leer. Zum
+        Verwalten antippen.
+      </p>
     </header>
 
     <!-- Контейнер для кнопок фильтрации -->
     <div id="filter-controls" class="text-center mb-6">
-        <button id="filter-all" onclick="filterTanks('all')" class="filter-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg mr-2 transition duration-150 shadow-md">
-            Alle Tanks
-        </button>
-        <button id="filter-empty" onclick="filterTanks('empty')" class="filter-btn bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg mr-2 transition duration-150 shadow-md">
-            Leere Tanks (Grün/Blau)
-        </button>
-        <button id="filter-full" onclick="filterTanks('full')" class="filter-btn bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md">
-            Gefüllte Tanks (Rot/Gelb)
-        </button>
+      <button
+        id="filter-all"
+        onclick="filterTanks('all')"
+        class="filter-btn bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg mr-2 transition duration-150 shadow-md"
+      >
+        Alle Tanks
+      </button>
+      <button
+        id="filter-empty"
+        onclick="filterTanks('empty')"
+        class="filter-btn bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg mr-2 transition duration-150 shadow-md"
+      >
+        Leere Tanks (Grün/Blau)
+      </button>
+      <button
+        id="filter-full"
+        onclick="filterTanks('full')"
+        class="filter-btn bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md"
+      >
+        Gefüllte Tanks (Rot/Gelb)
+      </button>
     </div>
 
     <!-- Главный контейнер списка емкостей -->
     <div id="plan-container">
-        <!-- Tanks будут добавлены сюда с помощью JS -->
+      <!-- Tanks будут добавлены сюда с помощью JS -->
     </div>
 
     <!-- Модальное окно (Общее для Tank-Details и Konfiguration) -->
-    <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
-        <div id="modal-container" class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all">
-            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-gray-800"></h2>
-            <div id="modal-content">
-                <!-- Здесь будет отображаться информация о Tank'е или форма конфигурации -->
-            </div>
-            <div id="modal-footer" class="mt-6 text-right">
-                <!-- Кнопки будут добавлены динамически -->
-            </div>
+    <div
+      id="modal"
+      class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50"
+    >
+      <div
+        id="modal-container"
+        class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all"
+      >
+        <h2 id="modal-title" class="text-2xl font-bold mb-4 text-gray-800"></h2>
+        <div id="modal-content">
+          <!-- Здесь будет отображаться информация о Tank'е или форма конфигурации -->
         </div>
+        <div id="modal-footer" class="mt-6 text-right">
+          <!-- Кнопки будут добавлены динамически -->
+        </div>
+      </div>
     </div>
 
     <!-- Шаблон для сообщения (вместо alert()) -->
-    <div id="message-box" class="fixed top-4 right-4 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50 transition-transform transform translate-x-full hidden"></div>
+    <div
+      id="message-box"
+      class="fixed top-4 right-4 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50 transition-transform transform translate-x-full hidden"
+    ></div>
 
     <script>
-        // Глобальные переменные Firebase (доступны после импорта)
-        let db;
-        let auth;
-        let configRef;
-        let dataRef;
-        let userId = 'anonymous'; // Инициализация с анонимным значением
-        let isAuthReady = false;
+      // Глобальные переменные Firebase (доступны после импорта)
+      let db;
+      let auth;
+      let configRef;
+      let dataRef;
+      let userId = "anonymous"; // Инициализация с анонимным значением
+      let isAuthReady = false;
 
-        // Глобальный объект для хранения динамических данных (status, wineDetails)
-        window.tanksData = {}; 
-        // Глобальный массив для хранения конфигурации (id, volume). Размер больше не фиксированный.
-        window.tanksConfig = []; 
-        
+      // Глобальный объект для хранения динамических данных (status, wineDetails)
+      window.tanksData = {};
+      // Глобальный массив для хранения конфигурации (id, volume). Размер больше не фиксированный.
+      window.tanksConfig = [];
+
+      window.currentTankId = null;
+      window.currentFilter = "all";
+
+      // Ключи для localStorage (оставлены только для запасной генерации дефолтного конфига)
+      const CONFIG_STORAGE_KEY = "WINE_TANK_CONFIG_V1";
+
+      // --- Утилиты Firebase и Инициализация ---
+      // Получение глобальных переменных из Canvas
+      const appId =
+        typeof __app_id !== "undefined" ? __app_id : "default-app-id";
+      const initialAuthToken =
+        typeof __initial_auth_token !== "undefined"
+          ? __initial_auth_token
+          : null;
+
+      // ИСПРАВЛЕНО: Объединение логики получения firebaseConfig, чтобы избежать повторного объявления.
+      // Сначала пытаемся получить из глобальной переменной, иначе используем жестко закодированный fallback.
+      const firebaseConfig =
+        typeof __firebase_config !== "undefined" && __firebase_config
+          ? JSON.parse(__firebase_config)
+          : {
+              apiKey: "AIzaSyADYtlIINW8qupTA6fQuF5EKJZAo400hVA",
+              authDomain: "winetankmonitor.firebaseapp.com",
+              projectId: "winetankmonitor",
+              storageBucket: "winetankmonitor.firebasestorage.app",
+              messagingSenderId: "382767118067",
+              appId: "1:382767118067:web:088c91c27a34d70ba92986",
+              measurementId: "G-R3XCD3F6XR",
+            };
+
+      /** Инициализация Firebase и Аутентификация */
+      async function setupFirebaseAndAuth() {
+        if (!window.firebase || !firebaseConfig) {
+          document.getElementById("auth-status").textContent =
+            "Fehler: Firebase Konfigurationsdaten fehlen.";
+          return;
+        }
+
+        try {
+          // Инициализация App и Firestore/Auth
+          const app = window.firebase.initializeApp(firebaseConfig);
+          db = window.firebase.getFirestore(app);
+          auth = window.firebase.getAuth(app);
+
+          // Настройка пути к публичным данным в Firestore
+          configRef = window.firebase.doc(
+            db,
+            `artifacts/${appId}/public/data/tank_config`,
+            "current_config"
+          );
+          dataRef = window.firebase.doc(
+            db,
+            `artifacts/${appId}/public/data/tank_data`,
+            "current_state"
+          );
+
+          // setLogLevel('debug'); // Для отладки
+
+          // Аутентификация
+          if (initialAuthToken) {
+            await window.firebase.signInWithCustomToken(auth, initialAuthToken);
+          } else {
+            await window.firebase.signInAnonymously(auth);
+          }
+
+          window.firebase.onAuthStateChanged(auth, (user) => {
+            if (user) {
+              userId = user.uid;
+              isAuthReady = true;
+              document.getElementById(
+                "auth-status"
+              ).textContent = `Datenbank: Firestore (${
+                user.isAnonymous ? "Anonym" : "Auth"
+              })`;
+              initializeStorageAndDisplay();
+            } else {
+              // Эта ветка не должна выполняться, так как мы используем анонимный вход
+              isAuthReady = true;
+              document.getElementById("auth-status").textContent =
+                "Fehler: Keine Benutzer-ID.";
+            }
+          });
+        } catch (error) {
+          console.error("Firebase Initialisierungsfehler:", error);
+          document.getElementById("auth-status").textContent =
+            "Fehler beim Laden der Datenbank.";
+        }
+      }
+
+      // --- Firebase CRUD Операции ---
+
+      /** Загружает Tank Config в реальном времени */
+      function subscribeToConfig() {
+        // Возвращает функцию отписки (unsubscribe), но нам она не нужна, т.к. приложение одностраничное
+        window.firebase.onSnapshot(
+          configRef,
+          (docSnap) => {
+            if (
+              docSnap.exists() &&
+              docSnap.data().config &&
+              Array.isArray(docSnap.data().config)
+            ) {
+              window.tanksConfig = docSnap.data().config;
+              console.log(
+                "Config aus Firestore geladen:",
+                window.tanksConfig.length,
+                "Tanks."
+              );
+            } else {
+              // Если данных нет, используем конфигурацию по умолчанию и сразу сохраняем
+              window.tanksConfig = generateDefaultConfig();
+              saveConfigToFirestore(window.tanksConfig, true); // Принудительное сохранение
+            }
+            renderInitialPlan();
+            updateTankDisplay();
+          },
+          (error) => {
+            console.error("Fehler beim Abonnieren der Konfiguration:", error);
+            window.showMessage(
+              "Fehler beim Laden der Konfiguration aus der Datenbank.",
+              "error"
+            );
+          }
+        );
+      }
+
+      /** Загружает Tank Data в реальном времени */
+      function subscribeToData() {
+        window.firebase.onSnapshot(
+          dataRef,
+          (docSnap) => {
+            if (
+              docSnap.exists() &&
+              docSnap.data().data &&
+              typeof docSnap.data().data === "object"
+            ) {
+              window.tanksData = docSnap.data().data;
+              console.log(
+                "Tank-Daten aus Firestore geladen:",
+                Object.keys(window.tanksData).length,
+                "Daten."
+              );
+            } else {
+              // Если данных нет, создаем пустой объект и сохраняем
+              window.tanksData = {};
+              // Не нужно сохранять сразу, т.к. saveConfigToFirestore позаботится о синхронизации данных
+            }
+            updateTankDisplay();
+          },
+          (error) => {
+            console.error("Fehler beim Abonnieren der Tank-Daten:", error);
+            window.showMessage(
+              "Fehler beim Laden der Tank-Daten aus der Datenbank.",
+              "error"
+            );
+          }
+        );
+      }
+
+      /** Сохраняет текущий Tank Config в Firestore */
+      async function saveConfigToFirestore(configToSave) {
+        if (!isAuthReady || !db) {
+          window.showMessage(
+            "Datenbank ist nicht bereit. Bitte warten Sie kurz.",
+            "warning"
+          );
+          return;
+        }
+        try {
+          // Используем setDoc для полной перезаписи конфигурации
+          await window.firebase.setDoc(configRef, { config: configToSave });
+          return true;
+        } catch (error) {
+          console.error("Fehler beim Speichern der Konfiguration:", error);
+          window.showMessage(
+            "Speichern der Konfiguration fehlgeschlagen!",
+            "error"
+          );
+          return false;
+        }
+      }
+
+      /** Сохраняет текущие динамические данные Tank'ов в Firestore */
+      async function saveTankDataToFirestore(dataToSave) {
+        if (!isAuthReady || !db) {
+          window.showMessage(
+            "Datenbank ist nicht bereit. Bitte warten Sie kurz.",
+            "warning"
+          );
+          return;
+        }
+        try {
+          // Используем setDoc для полной перезаписи состояния
+          await window.firebase.setDoc(dataRef, { data: dataToSave });
+          return true;
+        } catch (error) {
+          console.error("Fehler beim Speichern der Tank-Daten:", error);
+          window.showMessage(
+            "Speichern der Tank-Daten fehlgeschlagen!",
+            "error"
+          );
+          return false;
+        }
+      }
+
+      // --- Утилиты для Конфигурации (unchanged) ---
+
+      /** Генерирует 0 Tank'ов по умолчанию */
+      function generateDefaultConfig() {
+        const defaultConfig = [];
+        for (let i = 0; i <= 0; i++) {
+          defaultConfig.push({
+            position: i.toString(),
+            id: i.toString(),
+            volume: "0",
+          });
+        }
+        // Сохраняем как резервную копию в localStorage
+        try {
+          localStorage.setItem(
+            CONFIG_STORAGE_KEY,
+            JSON.stringify(defaultConfig)
+          );
+        } catch (e) {
+          console.warn("localStorage Speicherung fehlgeschlagen.");
+        }
+        return defaultConfig;
+      }
+
+      /** Возвращает объект конфигурации Tank'а по его Tank-ID */
+      function getTankConfigById(id) {
+        return window.tanksConfig.find((c) => c.id === id);
+      }
+
+      /** Показывает сообщение на экране вместо alert() */
+      window.showMessage = function (message, type = "success") {
+        const box = document.getElementById("message-box");
+        box.textContent = message;
+        box.classList.remove(
+          "hidden",
+          "bg-green-500",
+          "bg-red-500",
+          "bg-blue-500",
+          "bg-yellow-500",
+          "bg-orange-500"
+        );
+
+        let bgColor = "bg-green-500";
+        if (type === "error") bgColor = "bg-red-500";
+        else if (type === "info") bgColor = "bg-blue-500";
+        else if (type === "warning") bgColor = "bg-orange-500";
+
+        box.classList.add(bgColor);
+
+        box.classList.remove("translate-x-full");
+
+        setTimeout(() => {
+          box.classList.add("translate-x-full");
+          setTimeout(() => box.classList.add("hidden"), 300);
+        }, 3000);
+      };
+
+      /** Инициализация хранилища: подписка на данные Firestore */
+      function initializeStorageAndDisplay() {
+        if (!isAuthReady) return;
+
+        // Запуск подписок в реальном времени
+        subscribeToConfig();
+        subscribeToData();
+      }
+
+      // --- Логика Модального окна (Общая) ---
+
+      /** Закрывает модальное окно */
+      window.closeModal = function () {
+        document.getElementById("modal").classList.add("hidden");
+        document.getElementById("modal").classList.remove("flex");
+
+        const configForm = document.getElementById("config-form");
+        if (configForm) configForm.remove();
+
         window.currentTankId = null;
-        window.currentFilter = 'all'; 
-        
-        // Ключи для localStorage (оставлены только для запасной генерации дефолтного конфига)
-        const CONFIG_STORAGE_KEY = 'WINE_TANK_CONFIG_V1';
-        
-        // --- Утилиты Firebase и Инициализация ---
-        
-        // Получение глобальных переменных из Canvas
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        
-        /** Инициализация Firebase и Аутентификация */
-        async function setupFirebaseAndAuth() {
-            if (!window.firebase || !firebaseConfig) {
-                document.getElementById('auth-status').textContent = 'Fehler: Firebase Konfigurationsdaten fehlen.';
-                return;
-            }
+      };
 
-            try {
-                // Инициализация App и Firestore/Auth
-                const app = window.firebase.initializeApp(firebaseConfig);
-                db = window.firebase.getFirestore(app);
-                auth = window.firebase.getAuth(app);
-                
-                // Настройка пути к публичным данным в Firestore
-                configRef = window.firebase.doc(db, `artifacts/${appId}/public/data/tank_config`, 'current_config');
-                dataRef = window.firebase.doc(db, `artifacts/${appId}/public/data/tank_data`, 'current_state');
+      /** Открывает модальное окно */
+      function openGenericModal(title, contentHtml, footerHtml) {
+        document.getElementById("modal-title").textContent = title;
+        document.getElementById("modal-content").innerHTML = contentHtml;
+        document.getElementById("modal-footer").innerHTML = footerHtml;
+        document.getElementById("modal").classList.remove("hidden");
+        document.getElementById("modal").classList.add("flex");
 
-                // setLogLevel('debug'); // Для отладки
-                
-                // Аутентификация
-                if (initialAuthToken) {
-                    await window.firebase.signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await window.firebase.signInAnonymously(auth);
-                }
-
-                window.firebase.onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        document.getElementById('auth-status').textContent = `Datenbank: Firestore (${user.isAnonymous ? 'Anonym' : 'Auth'})`;
-                        initializeStorageAndDisplay();
-                    } else {
-                        // Эта ветка не должна выполняться, так как мы используем анонимный вход
-                        isAuthReady = true;
-                        document.getElementById('auth-status').textContent = 'Fehler: Keine Benutzer-ID.';
-                    }
-                });
-            } catch (error) {
-                console.error("Firebase Initialisierungsfehler:", error);
-                document.getElementById('auth-status').textContent = 'Fehler beim Laden der Datenbank.';
-            }
+        if (title.startsWith("Tank Nr.")) {
+          document
+            .getElementById("modal-container")
+            .classList.remove("max-w-4xl");
+          document.getElementById("modal-container").classList.add("max-w-md");
+        } else if (title === "Tank-Konfiguration") {
+          document
+            .getElementById("modal-container")
+            .classList.remove("max-w-md");
+          document.getElementById("modal-container").classList.add("max-w-4xl");
         }
+      }
 
-        // --- Firebase CRUD Операции ---
+      // --- Логика Tank Configuration (Обновлено для Firestore) ---
 
-        /** Загружает Tank Config в реальном времени */
-        function subscribeToConfig() {
-            // Возвращает функцию отписки (unsubscribe), но нам она не нужна, т.к. приложение одностраничное
-            window.firebase.onSnapshot(configRef, (docSnap) => {
-                if (docSnap.exists() && docSnap.data().config && Array.isArray(docSnap.data().config)) {
-                    window.tanksConfig = docSnap.data().config;
-                    console.log("Config aus Firestore geladen:", window.tanksConfig.length, "Tanks.");
-                } else {
-                    // Если данных нет, используем конфигурацию по умолчанию и сразу сохраняем
-                    window.tanksConfig = generateDefaultConfig();
-                    saveConfigToFirestore(window.tanksConfig, true); // Принудительное сохранение
-                }
-                renderInitialPlan();
-                updateTankDisplay();
-            }, (error) => {
-                console.error("Fehler beim Abonnieren der Konfiguration:", error);
-                window.showMessage('Fehler beim Laden der Konfiguration aus der Datenbank.', 'error');
-            });
-        }
+      /** Открывает модальное окно для конфигурации Tank'ов */
+      window.openConfigModal = function () {
+        // Важно: работаем с копией, чтобы изменения не влияли на основную переменную до сохранения
+        const currentConfigCopy = JSON.parse(
+          JSON.stringify(window.tanksConfig)
+        );
 
-        /** Загружает Tank Data в реальном времени */
-        function subscribeToData() {
-            window.firebase.onSnapshot(dataRef, (docSnap) => {
-                if (docSnap.exists() && docSnap.data().data && typeof docSnap.data().data === 'object') {
-                    window.tanksData = docSnap.data().data;
-                    console.log("Tank-Daten aus Firestore geladen:", Object.keys(window.tanksData).length, "Daten.");
-                } else {
-                    // Если данных нет, создаем пустой объект и сохраняем
-                    window.tanksData = {}; 
-                    // Не нужно сохранять сразу, т.к. saveConfigToFirestore позаботится о синхронизации данных
-                }
-                updateTankDisplay();
-            }, (error) => {
-                console.error("Fehler beim Abonnieren der Tank-Daten:", error);
-                window.showMessage('Fehler beim Laden der Tank-Daten aus der Datenbank.', 'error');
-            });
-        }
-        
-        /** Сохраняет текущий Tank Config в Firestore */
-        async function saveConfigToFirestore(configToSave) {
-            if (!isAuthReady || !db) {
-                window.showMessage('Datenbank ist nicht bereit. Bitte warten Sie kurz.', 'warning');
-                return;
-            }
-            try {
-                // Используем setDoc для полной перезаписи конфигурации
-                await window.firebase.setDoc(configRef, { config: configToSave });
-                return true;
-            } catch (error) {
-                console.error("Fehler beim Speichern der Konfiguration:", error);
-                window.showMessage('Speichern der Konfiguration fehlgeschlagen!', 'error');
-                return false;
-            }
-        }
-        
-        /** Сохраняет текущие динамические данные Tank'ов в Firestore */
-        async function saveTankDataToFirestore(dataToSave) {
-            if (!isAuthReady || !db) {
-                window.showMessage('Datenbank ist nicht bereit. Bitte warten Sie kurz.', 'warning');
-                return;
-            }
-            try {
-                // Используем setDoc для полной перезаписи состояния
-                await window.firebase.setDoc(dataRef, { data: dataToSave });
-                return true;
-            } catch (error) {
-                console.error("Fehler beim Speichern der Tank-Daten:", error);
-                window.showMessage('Speichern der Tank-Daten fehlgeschlagen!', 'error');
-                return false;
-            }
-        }
+        let tableRows = "";
 
-        // --- Утилиты для Конфигурации (unchanged) ---
-
-        /** Генерирует 10 Tank'ов по умолчанию */
-        function generateDefaultConfig() {
-            const defaultConfig = [];
-            for (let i = 0; i <= 0; i++) {
-                defaultConfig.push({
-                    position: i.toString(),
-                    id: i.toString(),
-                    volume: '0'
-                });
-            }
-            // Сохраняем как резервную копию в localStorage
-            try {
-                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(defaultConfig));
-            } catch (e) {
-                console.warn("localStorage Speicherung fehlgeschlagen.");
-            }
-            return defaultConfig;
-        }
-
-        /** Возвращает объект конфигурации Tank'а по его Tank-ID */
-        function getTankConfigById(id) {
-            return window.tanksConfig.find(c => c.id === id);
-        }
-        
-        /** Показывает сообщение на экране вместо alert() */
-        window.showMessage = function(message, type = 'success') {
-            const box = document.getElementById('message-box');
-            box.textContent = message;
-            box.classList.remove('hidden', 'bg-green-500', 'bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-orange-500');
-            
-            let bgColor = 'bg-green-500';
-            if (type === 'error') bgColor = 'bg-red-500';
-            else if (type === 'info') bgColor = 'bg-blue-500';
-            else if (type === 'warning') bgColor = 'bg-orange-500';
-
-            box.classList.add(bgColor);
-            
-            box.classList.remove('translate-x-full');
-            
-            setTimeout(() => {
-                box.classList.add('translate-x-full');
-                setTimeout(() => box.classList.add('hidden'), 300); 
-            }, 3000);
-        }
-        
-        /** Инициализация хранилища: подписка на данные Firestore */
-        function initializeStorageAndDisplay() {
-            if (!isAuthReady) return;
-            
-            // Запуск подписок в реальном времени
-            subscribeToConfig();
-            subscribeToData();
-        }
-
-
-        // --- Логика Модального окна (Общая) ---
-
-        /** Закрывает модальное окно */
-        window.closeModal = function() {
-            document.getElementById('modal').classList.add('hidden');
-            document.getElementById('modal').classList.remove('flex');
-
-            const configForm = document.getElementById('config-form');
-            if (configForm) configForm.remove();
-
-            window.currentTankId = null;
-        }
-
-        /** Открывает модальное окно */
-        function openGenericModal(title, contentHtml, footerHtml) {
-            document.getElementById('modal-title').textContent = title;
-            document.getElementById('modal-content').innerHTML = contentHtml;
-            document.getElementById('modal-footer').innerHTML = footerHtml;
-            document.getElementById('modal').classList.remove('hidden');
-            document.getElementById('modal').classList.add('flex');
-
-            if (title.startsWith('Tank Nr.')) {
-                document.getElementById('modal-container').classList.remove('max-w-4xl');
-                document.getElementById('modal-container').classList.add('max-w-md');
-            } 
-            else if (title === 'Tank-Konfiguration') {
-                document.getElementById('modal-container').classList.remove('max-w-md');
-                document.getElementById('modal-container').classList.add('max-w-4xl');
-            }
-        }
-
-
-        // --- Логика Tank Configuration (Обновлено для Firestore) ---
-
-        /** Открывает модальное окно для конфигурации Tank'ов */
-        window.openConfigModal = function() {
-            // Важно: работаем с копией, чтобы изменения не влияли на основную переменную до сохранения
-            const currentConfigCopy = JSON.parse(JSON.stringify(window.tanksConfig)); 
-            
-            let tableRows = '';
-
-            currentConfigCopy.forEach((item, index) => {
-                // position - это порядковый номер в массиве, используем его как Row ID для DOM
-                // Используем config.position для Row ID, но обновляем отображаемую Pos.
-                tableRows += `
-                    <tr id="config-row-${item.position}" data-original-id="${item.id}" class="hover:bg-gray-50 border-t">
-                        <td class="px-2 py-2 text-sm text-gray-500">${index + 1}</td>
+        currentConfigCopy.forEach((item, index) => {
+          // position - это порядковый номер в массиве, используем его как Row ID для DOM
+          // Используем config.position для Row ID, но обновляем отображаемую Pos.
+          tableRows += `
+                    <tr id="config-row-${item.position}" data-original-id="${
+            item.id
+          }" class="hover:bg-gray-50 border-t">
+                        <td class="px-2 py-2 text-sm text-gray-500">${
+                          index + 1
+                        }</td>
                         <td class="px-2 py-2">
-                            <input type="text" name="id_${item.position}" value="${item.id}" required 
+                            <input type="text" name="id_${
+                              item.position
+                            }" value="${item.id}" required 
                                    class="w-full border border-gray-300 rounded-md shadow-sm p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500 font-semibold" 
                                    pattern="[A-Za-z0-9-]+" title="Nur Buchstaben, Zahlen und Bindestriche erlaubt">
                         </td>
                         <td class="px-2 py-2">
-                            <input type="text" name="volume_${item.position}" value="${item.volume}" required 
+                            <input type="text" name="volume_${
+                              item.position
+                            }" value="${item.volume}" required 
                                    class="w-full border border-gray-300 rounded-md shadow-sm p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500">
                         </td>
                         <td class="px-2 py-2 text-center w-1/12">
-                            <button type="button" onclick="deleteTankRow('${item.position}')" title="Tank löschen" 
+                            <button type="button" onclick="deleteTankRow('${
+                              item.position
+                            }')" title="Tank löschen" 
                                     class="text-red-500 hover:text-red-700 transition duration-150 p-1">
                                 <svg class="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                             </button>
                         </td>
                     </tr>
                 `;
-            });
+        });
 
-            const contentHtml = `
+        const contentHtml = `
                 <form id="config-form" onsubmit="event.preventDefault(); saveConfigChanges(event)" class="space-y-4">
                     <p class="text-sm text-gray-600">Bearbeiten Sie die ID (Tank Nr.) und das Volumen für jede Tank-Position. Speichern Sie, um die Änderungen zu übernehmen.</p>
                     <div class="overflow-y-auto max-h-[60vh] border rounded-lg">
@@ -438,43 +586,46 @@
                 </form>
             `;
 
-            const footerHtml = `
+        const footerHtml = `
                 <button type="submit" form="config-form" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 mr-2">Konfiguration speichern</button>
                 <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Abbrechen</button>
             `;
-            
-            openGenericModal('Tank-Konfiguration', contentHtml, footerHtml);
+
+        openGenericModal("Tank-Konfiguration", contentHtml, footerHtml);
+      };
+
+      /** Удаляет строку Tank'а из модального окна конфигурации (перед сохранением) */
+      window.deleteTankRow = function (position) {
+        const row = document.getElementById(`config-row-${position}`);
+        if (row) {
+          row.remove();
+          // Пересчитываем номера позиций в первой колонке
+          const tbody = document.getElementById("config-table-body");
+          for (let i = 0; i < tbody.rows.length; i++) {
+            tbody.rows[i].cells[0].textContent = (i + 1).toString();
+          }
+          window.showMessage(
+            `Tank-Position ${position} zur Löschung vorgemerkt. Speichern, um zu bestätigen.`,
+            "warning"
+          );
         }
+      };
 
-        /** Удаляет строку Tank'а из модального окна конфигурации (перед сохранением) */
-        window.deleteTankRow = function(position) {
-            const row = document.getElementById(`config-row-${position}`);
-            if (row) {
-                row.remove();
-                // Пересчитываем номера позиций в первой колонке
-                const tbody = document.getElementById('config-table-body');
-                for (let i = 0; i < tbody.rows.length; i++) {
-                    tbody.rows[i].cells[0].textContent = (i + 1).toString();
-                }
-                window.showMessage(`Tank-Position ${position} zur Löschung vorgemerkt. Speichern, um zu bestätigen.`, 'warning');
-            }
-        }
+      /** Добавляет новую строку для Tank'а в модальное окно конфигурации */
+      window.addTankToConfigModal = function () {
+        const tbody = document.getElementById("config-table-body");
+        if (!tbody) return;
 
-        /** Добавляет новую строку для Tank'а в модальное окно конфигурации */
-        window.addTankToConfigModal = function() {
-            const tbody = document.getElementById('config-table-body');
-            if (!tbody) return;
+        // Используем уникальный временный ID для новой строки
+        const newPosition = "new_" + Date.now();
+        const newDisplayPosition = tbody.rows.length + 1;
+        const newId = newDisplayPosition.toString();
+        const newVolume = "0";
 
-            // Используем уникальный временный ID для новой строки
-            const newPosition = 'new_' + Date.now(); 
-            const newDisplayPosition = tbody.rows.length + 1;
-            const newId = (newDisplayPosition).toString(); 
-            const newVolume = '0'; 
-
-            const tr = document.createElement('tr');
-            tr.id = `config-row-${newPosition}`; 
-            tr.className = 'hover:bg-gray-50 border-t';
-            tr.innerHTML = `
+        const tr = document.createElement("tr");
+        tr.id = `config-row-${newPosition}`;
+        tr.className = "hover:bg-gray-50 border-t";
+        tr.innerHTML = `
                 <td class="px-2 py-2 text-sm text-gray-500">${newDisplayPosition}</td>
                 <td class="px-2 py-2">
                     <input type="text" name="id_${newPosition}" value="${newId}" required 
@@ -492,168 +643,208 @@
                     </button>
                 </td>
             `;
-            tbody.appendChild(tr);
+        tbody.appendChild(tr);
 
-            tr.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        tr.scrollIntoView({ behavior: "smooth", block: "end" });
+      };
+
+      /** ОБНОВЛЕНО: Сохраняет изменения конфигурации и отправляет их в Firestore */
+      window.saveConfigChanges = async function (event) {
+        const tbody = document.getElementById("config-table-body");
+        if (!tbody || !isAuthReady) {
+          window.showMessage(
+            "Datenbank nicht bereit oder Konfigurationsformular fehlt.",
+            "error"
+          );
+          return;
         }
 
-        /** ОБНОВЛЕНО: Сохраняет изменения конфигурации и отправляет их в Firestore */
-        window.saveConfigChanges = async function(event) {
-            const tbody = document.getElementById('config-table-body');
-            if (!tbody || !isAuthReady) {
-                window.showMessage("Datenbank nicht bereit oder Konfigurationsformular fehlt.", 'error');
-                return;
-            }
+        const newConfig = [];
+        const newIds = [];
+        let hasError = false;
 
-            const newConfig = [];
-            const newIds = [];
-            let hasError = false;
+        // 1. Сбор и валидация данных из формы
+        for (let i = 0; i < tbody.rows.length; i++) {
+          const row = tbody.rows[i];
+          const idInput = row.cells[1].querySelector("input");
+          const volumeInput = row.cells[2].querySelector("input");
 
-            // 1. Сбор и валидация данных из формы
-            for (let i = 0; i < tbody.rows.length; i++) {
-                const row = tbody.rows[i];
-                const idInput = row.cells[1].querySelector('input');
-                const volumeInput = row.cells[2].querySelector('input');
+          const position = (i + 1).toString();
+          const newId = idInput.value.trim();
+          const newVolume = volumeInput.value.trim();
 
-                const position = (i + 1).toString();
-                const newId = idInput.value.trim();
-                const newVolume = volumeInput.value.trim();
-                
-                // Сброс ошибок
-                idInput.classList.remove('config-error');
-                volumeInput.classList.remove('config-error');
+          // Сброс ошибок
+          idInput.classList.remove("config-error");
+          volumeInput.classList.remove("config-error");
 
-                if (newId === '' || newVolume === '') {
-                    window.showMessage(`Fehler: ID und Volumen dürfen nicht leer sein (Pos. ${position}).`, 'error');
-                    idInput.classList.add('config-error');
-                    volumeInput.classList.add('config-error');
-                    hasError = true;
-                    break;
-                }
-                if (newIds.includes(newId)) {
-                    window.showMessage(`Fehler: Die Tank ID "${newId}" ist dupliziert.`, 'error');
-                    idInput.classList.add('config-error');
-                    hasError = true;
-                    break;
-                }
-                newIds.push(newId);
+          if (newId === "" || newVolume === "") {
+            window.showMessage(
+              `Fehler: ID und Volumen dürfen nicht leer sein (Pos. ${position}).`,
+              "error"
+            );
+            idInput.classList.add("config-error");
+            volumeInput.classList.add("config-error");
+            hasError = true;
+            break;
+          }
+          if (newIds.includes(newId)) {
+            window.showMessage(
+              `Fehler: Die Tank ID "${newId}" ist dupliziert.`,
+              "error"
+            );
+            idInput.classList.add("config-error");
+            hasError = true;
+            break;
+          }
+          newIds.push(newId);
 
-                newConfig.push({
-                    position: position,
-                    id: newId,
-                    volume: newVolume,
-                });
-            }
-
-            if (hasError) return;
-
-            // 2. Слияние (Merge) с текущим состоянием данных (tanksData)
-            const oldTankData = JSON.parse(JSON.stringify(window.tanksData));
-            const newTankData = {};
-            
-            newConfig.forEach(config => {
-                const newId = config.id;
-                
-                // Если Tank с новым ID уже существует в старых данных, переносим его состояние
-                if (oldTankData[newId]) {
-                    newTankData[newId] = oldTankData[newId];
-                } else {
-                    // Иначе создаем новый (статус 'empty')
-                    newTankData[newId] = { id: newId, status: 'empty', wineDetails: null };
-                }
-            });
-            // Старые Tank'и, чьи ID были удалены или изменены, не попадут в newTankData и будут удалены из Firestore при сохранении.
-
-            // 3. Атомарное сохранение конфигурации и данных в Firestore
-            const batch = window.firebase.writeBatch(db);
-            
-            // Запись новой конфигурации
-            batch.set(configRef, { config: newConfig });
-            
-            // Запись обновленных данных Tank'ов
-            batch.set(dataRef, { data: newTankData });
-            
-            try {
-                await batch.commit();
-                
-                // После успешного коммита, onSnapshot обновит локальные window.tanksConfig и window.tanksData
-                closeModal();
-                window.showMessage('Tank-Konfiguration und Tank-Daten erfolgreich synchronisiert!', 'success');
-            } catch (error) {
-                console.error("Fehler beim Batch-Speichern:", error);
-                window.showMessage('Speichern der Konfiguration und Daten fehlgeschlagen!', 'error');
-            }
+          newConfig.push({
+            position: position,
+            id: newId,
+            volume: newVolume,
+          });
         }
 
+        if (hasError) return;
 
-        // --- Логика Tank Details и Actions (Обновлено для Firestore) ---
+        // 2. Слияние (Merge) с текущим состоянием данных (tanksData)
+        const oldTankData = JSON.parse(JSON.stringify(window.tanksData));
+        const newTankData = {};
 
-        /** Обновляет модальное окно в зависимости от статуса Tank'а (без изменений) */
-        window.openTankDetailsModal = function(tankId) {
-            window.currentTankId = tankId;
-            const tank = window.tanksData[tankId];
-            const config = getTankConfigById(tankId);
-            const volume = config ? config.volume : 'N/A';
-            
-            if (!tank || !tank.status || !config) {
-                const content = '<p class="text-red-600 font-semibold">Daten für diesen Tank konnten nicht geladen werden.</p>';
-                openGenericModal(`Tank Nr.${tankId} (${volume})`, content, `<button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`);
-                return;
-            }
+        newConfig.forEach((config) => {
+          const newId = config.id;
 
-            let htmlContent = '';
-            const currentStatus = tank.status;
+          // Если Tank с новым ID уже существует в старых данных, переносим его состояние
+          if (oldTankData[newId]) {
+            newTankData[newId] = oldTankData[newId];
+          } else {
+            // Иначе создаем новый (статус 'empty')
+            newTankData[newId] = {
+              id: newId,
+              status: "empty",
+              wineDetails: null,
+            };
+          }
+        });
+        // Старые Tank'и, чьи ID были удалены или изменены, не попадут в newTankData и будут удалены из Firestore при сохранении.
 
-            const wineInfoHtml = (tank.wineDetails && (currentStatus === 'full' || currentStatus === 'to_be_emptied' || currentStatus === 'reserved')) ? `
+        // 3. Атомарное сохранение конфигурации и данных в Firestore
+        const batch = window.firebase.writeBatch(db);
+
+        // Запись новой конфигурации
+        batch.set(configRef, { config: newConfig });
+
+        // Запись обновленных данных Tank'ов
+        batch.set(dataRef, { data: newTankData });
+
+        try {
+          await batch.commit();
+
+          // После успешного коммита, onSnapshot обновит локальные window.tanksConfig и window.tanksData
+          closeModal();
+          window.showMessage(
+            "Tank-Konfiguration und Tank-Daten erfolgreich synchronisiert!",
+            "success"
+          );
+        } catch (error) {
+          console.error("Fehler beim Batch-Speichern:", error);
+          window.showMessage(
+            "Speichern der Konfiguration und Daten fehlgeschlagen!",
+            "error"
+          );
+        }
+      };
+
+      // --- Логика Tank Details и Actions (Обновлено для Firestore) ---
+
+      /** Обновляет модальное окно в зависимости от статуса Tank'а (без изменений) */
+      window.openTankDetailsModal = function (tankId) {
+        window.currentTankId = tankId;
+        const tank = window.tanksData[tankId];
+        const config = getTankConfigById(tankId);
+        const volume = config ? config.volume : "N/A";
+
+        if (!tank || !tank.status || !config) {
+          const content =
+            '<p class="text-red-600 font-semibold">Daten für diesen Tank konnten nicht geladen werden.</p>';
+          openGenericModal(
+            `Tank Nr.${tankId} (${volume})`,
+            content,
+            `<button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`
+          );
+          return;
+        }
+
+        let htmlContent = "";
+        const currentStatus = tank.status;
+
+        const wineInfoHtml =
+          tank.wineDetails &&
+          (currentStatus === "full" ||
+            currentStatus === "to_be_emptied" ||
+            currentStatus === "reserved")
+            ? `
                 <div class="space-y-3 mt-4 p-4 border rounded-lg bg-gray-50">
                     <p class="text-sm font-semibold text-gray-700">Wein-Details:</p>
-                    <p><span class="font-medium text-gray-600">Jahrgang:</span> ${tank.wineDetails.year || 'N/A'}</p>
-                    <p><span class="font-medium text-gray-600">Rebsorte:</span> ${tank.wineDetails.variety || 'N/A'}</p>
-                    ${tank.wineDetails.addedAt ? `<p class="text-xs text-gray-500 pt-2">Hinzugefügt: ${new Date(tank.wineDetails.addedAt).toLocaleString('de-DE')}</p>` : ''}
+                    <p><span class="font-medium text-gray-600">Jahrgang:</span> ${
+                      tank.wineDetails.year || "N/A"
+                    }</p>
+                    <p><span class="font-medium text-gray-600">Rebsorte:</span> ${
+                      tank.wineDetails.variety || "N/A"
+                    }</p>
+                    ${
+                      tank.wineDetails.addedAt
+                        ? `<p class="text-xs text-gray-500 pt-2">Hinzugefügt: ${new Date(
+                            tank.wineDetails.addedAt
+                          ).toLocaleString("de-DE")}</p>`
+                        : ""
+                    }
                 </div>
-            ` : '';
+            `
+            : "";
 
-            let footerHtml = '';
+        let footerHtml = "";
 
-            switch (currentStatus) {
-                case 'full': {
-                    const statusText = `<span class="text-red-600 font-bold">Gefüllt</span>`;
-                    
-                    const actionButton = `
+        switch (currentStatus) {
+          case "full": {
+            const statusText = `<span class="text-red-600 font-bold">Gefüllt</span>`;
+
+            const actionButton = `
                         <button onclick="markForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition duration-150 shadow-md">Für Entleerung vormerken (Blau)</button>
                         <button onclick="emptyTank('${tankId}')" class="w-full mt-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition duration-150 shadow-md">Tank jetzt leeren (Grün)</button>
                     `;
 
-                    htmlContent = `<p class="mb-4"><span class="font-semibold">Status:</span> ${statusText}</p>${wineInfoHtml}`;
-                    footerHtml = `${actionButton}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
-                    break;
-                }
+            htmlContent = `<p class="mb-4"><span class="font-semibold">Status:</span> ${statusText}</p>${wineInfoHtml}`;
+            footerHtml = `${actionButton}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
+            break;
+          }
 
-                case 'to_be_emptied': { 
-                    const statusText = `<span class="text-blue-600 font-bold">Wird Leer</span>`;
-                    
-                    const actionButton = `
+          case "to_be_emptied": {
+            const statusText = `<span class="text-blue-600 font-bold">Wird Leer</span>`;
+
+            const actionButton = `
                           <button onclick="undoMarkForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Markierung Rückgängig (Rot)</button>
                           <button onclick="emptyTank('${tankId}')" class="w-full mt-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition duration-150 shadow-md">Tank jetzt leeren (Grün)</button>
                         `;
 
-                    htmlContent = `<p class="mb-4"><span class="font-semibold">Status:</span> ${statusText}</p>${wineInfoHtml}`;
-                    footerHtml = `${actionButton}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
-                    break;
-                }
+            htmlContent = `<p class="mb-4"><span class="font-semibold">Status:</span> ${statusText}</p>${wineInfoHtml}`;
+            footerHtml = `${actionButton}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
+            break;
+          }
 
-                case 'empty':
-                case 'reserved':
-                    const isReserved = currentStatus === 'reserved';
-                    let formTitle;
-                    let formButtons;
-                    let reserveButtonExternal = '';
-                    
-                    const currentDetails = tank.wineDetails || {};
-                    const prefilledYear = currentDetails.year || new Date().getFullYear();
-                    const prefilledVariety = currentDetails.variety || '';
+          case "empty":
+          case "reserved":
+            const isReserved = currentStatus === "reserved";
+            let formTitle;
+            let formButtons;
+            let reserveButtonExternal = "";
 
-                    const formFields = `
+            const currentDetails = tank.wineDetails || {};
+            const prefilledYear =
+              currentDetails.year || new Date().getFullYear();
+            const prefilledVariety = currentDetails.variety || "";
+
+            const formFields = `
                         <div class="mb-3">
                             <label for="wine-year" class="block text-sm font-medium text-gray-700">Jahrgang (JJJJ)</label>
                             <input type="number" id="wine-year" name="year" required min="1900" max="${new Date().getFullYear()}" value="${prefilledYear}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
@@ -664,245 +855,279 @@
                         </div>
                     `;
 
-                    if (isReserved) {
-                        formTitle = `<p class="mb-4 text-yellow-700 font-bold">RESERVIERT für ${prefilledVariety}. Daten überprüfen und zum Füllen bereit.</p>`;
-                        formButtons = `
+            if (isReserved) {
+              formTitle = `<p class="mb-4 text-yellow-700 font-bold">RESERVIERT für ${prefilledVariety}. Daten überprüfen und zum Füllen bereit.</p>`;
+              formButtons = `
                             <button type="submit" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition duration-150 shadow-md text-lg" data-target-status="full">Füllen & Status auf ROT setzen</button>
                         `;
-                        reserveButtonExternal = `<button onclick="unreserveTank('${tankId}')" class="w-full mt-3 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Reservierung aufheben (Grün)</button>`;
-
-                    } else {
-                        formTitle = `<p class="mb-4 text-green-600 font-bold">Leer. Geben Sie die Weindaten ein, um den Tank zu füllen oder zu reservieren.</p>`;
-                        formButtons = `
+              reserveButtonExternal = `<button onclick="unreserveTank('${tankId}')" class="w-full mt-3 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Reservierung aufheben (Grün)</button>`;
+            } else {
+              formTitle = `<p class="mb-4 text-green-600 font-bold">Leer. Geben Sie die Weindaten ein, um den Tank zu füllen oder zu reservieren.</p>`;
+              formButtons = `
                             <button type="submit" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition duration-150 shadow-md text-lg" data-target-status="full">Wein hinzufügen & füllen (Rot)</button>
                             <button type="submit" class="w-full mt-3 px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition duration-150 shadow-md" data-target-status="reserved">Tank reservieren (Gelb)</button>
                         `;
-                    }
+            }
 
-                    htmlContent = `
+            htmlContent = `
                         ${formTitle}
                         <form id="wine-action-form" onsubmit="event.preventDefault(); handleWineAction(event)">
                             ${formFields}
                             ${formButtons}
                         </form>
                     `;
-                    footerHtml = `${reserveButtonExternal}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
+            footerHtml = `${reserveButtonExternal}<button onclick="closeModal()" class="w-full mt-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">Schließen</button>`;
 
-                    break;
+            break;
+        }
+
+        openGenericModal(
+          `Tank Nr.${tankId} (${volume})`,
+          htmlContent,
+          footerHtml
+        );
+      };
+
+      /** Обработчик формы для 'empty' и 'reserved' */
+      window.handleWineAction = async function (event) {
+        const form = event.target;
+        const targetStatus = event.submitter.getAttribute("data-target-status");
+        const tankId = window.currentTankId;
+
+        if (!targetStatus || !tankId || !isAuthReady) return;
+
+        const varietyInput = form.elements["variety"];
+        if (!varietyInput.value.trim()) {
+          window.showMessage("Rebsorte ist ein Pflichtfeld.", "error");
+          varietyInput.focus();
+          varietyInput.classList.add("config-error");
+          return;
+        }
+        varietyInput.classList.remove("config-error");
+
+        const wineDetails = {
+          year: form.elements["year"].value || new Date().getFullYear(),
+          variety: varietyInput.value.trim(),
+          addedAt: new Date().toISOString(),
+        };
+
+        // ОБНОВЛЕНО: Создание копии, обновление и сохранение в Firestore
+        const newData = JSON.parse(JSON.stringify(window.tanksData));
+        newData[tankId].status = targetStatus;
+        newData[tankId].wineDetails = wineDetails;
+
+        const success = await saveTankDataToFirestore(newData);
+
+        if (success) {
+          closeModal();
+          window.showMessage(
+            `Tank ${tankId} wurde erfolgreich als '${targetStatus}' markiert.`,
+            "success"
+          );
+        }
+      };
+
+      /** (Action) Пометить для опустошения (Синий) */
+      window.markForEmptying = async function (tankId) {
+        if (!isAuthReady) return;
+        const newData = JSON.parse(JSON.stringify(window.tanksData));
+        newData[tankId].status = "to_be_emptied";
+
+        const success = await saveTankDataToFirestore(newData);
+        if (success) {
+          closeModal();
+          window.showMessage(
+            `Tank ${tankId} zur Entleerung vorgemerkt (Blau).`,
+            "info"
+          );
+        }
+      };
+
+      /** (Action) Отменить пометку (Красный) */
+      window.undoMarkForEmptying = async function (tankId) {
+        if (!isAuthReady) return;
+        const newData = JSON.parse(JSON.stringify(window.tanksData));
+        newData[tankId].status = "full";
+
+        const success = await saveTankDataToFirestore(newData);
+        if (success) {
+          closeModal();
+          window.showMessage(
+            `Vormerkung für Tank ${tankId} aufgehoben (Rot).`,
+            "warning"
+          );
+        }
+      };
+
+      /** (Action) Опустошить Tank (Зеленый) */
+      window.emptyTank = async function (tankId) {
+        if (!isAuthReady) return;
+        const newData = JSON.parse(JSON.stringify(window.tanksData));
+        newData[tankId].status = "empty";
+        newData[tankId].wineDetails = null;
+
+        const success = await saveTankDataToFirestore(newData);
+        if (success) {
+          closeModal();
+          window.showMessage(`Tank ${tankId} wurde geleert (Grün).`, "success");
+        }
+      };
+
+      /** (Action) Отменить резервирование (Зеленый) */
+      window.unreserveTank = async function (tankId) {
+        if (!isAuthReady) return;
+        const newData = JSON.parse(JSON.stringify(window.tanksData));
+        newData[tankId].status = "empty";
+        newData[tankId].wineDetails = null;
+
+        const success = await saveTankDataToFirestore(newData);
+        if (success) {
+          closeModal();
+          window.showMessage(
+            `Reservierung für Tank ${tankId} aufgehoben (Grün).`,
+            "success"
+          );
+        }
+      };
+
+      // --- Логика Обновления UI ---
+
+      /** Обновляет стили кнопок фильтрации */
+      function updateFilterButtons(activeFilter) {
+        document
+          .querySelectorAll("#filter-controls .filter-btn")
+          .forEach((button) => {
+            button.classList.remove(
+              "ring-4",
+              "ring-offset-2",
+              "ring-gray-400",
+              "ring-offset-white"
+            );
+          });
+
+        const activeButton = document.getElementById(`filter-${activeFilter}`);
+        if (activeButton) {
+          activeButton.classList.add(
+            "ring-4",
+            "ring-offset-2",
+            "ring-gray-400",
+            "ring-offset-white"
+          );
+        }
+      }
+
+      /** Обновление внешнего вида Tanks'ов на плане (включая фильтрацию) */
+      function updateTankDisplay() {
+        // Используем tanksConfig для итерации, чтобы гарантировать правильный порядок
+        window.tanksConfig.forEach((config) => {
+          const id = config.id;
+          const tankElement = document.querySelector(`.tank[data-id="${id}"]`);
+          const data = window.tanksData[id];
+
+          if (tankElement) {
+            // Удаляем все классы статуса
+            tankElement.classList.remove(
+              "tank-full",
+              "tank-empty",
+              "tank-reserved",
+              "tank-to-be-emptied",
+              "config-error"
+            );
+
+            let isVisible = true;
+            const status = data ? data.status : "config-error";
+
+            if (status !== "config-error") {
+              // Применение цветового класса
+              tankElement.classList.add(`tank-${status.replace(/_/g, "-")}`);
+            } else {
+              // Обработка ошибки конфигурации (если нет динамических данных)
+              tankElement.classList.add("config-error");
             }
-            
-            openGenericModal(`Tank Nr.${tankId} (${volume})`, htmlContent, footerHtml);
-        }
 
-        /** Обработчик формы для 'empty' и 'reserved' */
-        window.handleWineAction = async function(event) {
-            const form = event.target;
-            const targetStatus = event.submitter.getAttribute('data-target-status');
-            const tankId = window.currentTankId;
+            // Логика фильтрации
+            const isFullCategory = status === "full" || status === "reserved";
+            const isEmptyCategory =
+              status === "empty" || status === "to_be_emptied";
 
-            if (!targetStatus || !tankId || !isAuthReady) return;
-
-            const varietyInput = form.elements['variety'];
-            if (!varietyInput.value.trim()) {
-                window.showMessage('Rebsorte ist ein Pflichtfeld.', 'error');
-                varietyInput.focus();
-                varietyInput.classList.add('config-error');
-                return;
+            if (window.currentFilter === "empty" && !isEmptyCategory) {
+              isVisible = false;
+            } else if (window.currentFilter === "full" && !isFullCategory) {
+              isVisible = false;
+            } else if (window.currentFilter === "all") {
+              isVisible = true;
             }
-            varietyInput.classList.remove('config-error');
 
-            const wineDetails = {
-                year: form.elements['year'].value || new Date().getFullYear(),
-                variety: varietyInput.value.trim(),
-                addedAt: new Date().toISOString()
-            };
-            
-            // ОБНОВЛЕНО: Создание копии, обновление и сохранение в Firestore
-            const newData = JSON.parse(JSON.stringify(window.tanksData));
-            newData[tankId].status = targetStatus;
-            newData[tankId].wineDetails = wineDetails;
-            
-            const success = await saveTankDataToFirestore(newData);
+            tankElement.style.display = isVisible ? "flex" : "none";
 
-            if (success) {
-                closeModal();
-                window.showMessage(`Tank ${tankId} wurde erfolgreich als '${targetStatus}' markiert.`, 'success');
-            }
-        }
+            // Обновление отображаемых ID и Volume
+            tankElement.querySelector(".text-xl").textContent = id;
+            tankElement.querySelector(".text-xs").textContent = config.volume;
 
-        /** (Action) Пометить для опустошения (Синий) */
-        window.markForEmptying = async function(tankId) {
-            if (!isAuthReady) return;
-            const newData = JSON.parse(JSON.stringify(window.tanksData));
-            newData[tankId].status = 'to_be_emptied';
-            
-            const success = await saveTankDataToFirestore(newData);
-            if (success) {
-                closeModal();
-                window.showMessage(`Tank ${tankId} zur Entleerung vorgemerkt (Blau).`, 'info');
-            }
-        }
+            // Обновляем data-id для правильной обработки кликов (на случай, если ID изменился)
+            tankElement.setAttribute("data-id", id);
+          }
+        });
+        updateFilterButtons(window.currentFilter);
+      }
 
-        /** (Action) Отменить пометку (Красный) */
-        window.undoMarkForEmptying = async function(tankId) {
-            if (!isAuthReady) return;
-            const newData = JSON.parse(JSON.stringify(window.tanksData));
-            newData[tankId].status = 'full';
+      /** Фильтрует Tanks по статусу */
+      window.filterTanks = function (filter) {
+        window.currentFilter = filter;
+        updateTankDisplay();
+      };
 
-            const success = await saveTankDataToFirestore(newData);
-            if (success) {
-                closeModal();
-                window.showMessage(`Vormerkung für Tank ${tankId} aufgehoben (Rot).`, 'warning');
-            }
-        }
+      /** Первичный рендеринг плана (создание DOM-элементов) */
+      function renderInitialPlan() {
+        const container = document.getElementById("plan-container");
+        // Собираем текущие ID элементов
+        const existingIds = Array.from(container.children).map((el) =>
+          el.getAttribute("data-id")
+        );
+        const configIds = window.tanksConfig.map((c) => c.id);
 
-        /** (Action) Опустошить Tank (Зеленый) */
-        window.emptyTank = async function(tankId) {
-            if (!isAuthReady) return;
-            const newData = JSON.parse(JSON.stringify(window.tanksData));
-            newData[tankId].status = 'empty';
-            newData[tankId].wineDetails = null;
-
-            const success = await saveTankDataToFirestore(newData);
-            if (success) {
-                closeModal();
-                window.showMessage(`Tank ${tankId} wurde geleert (Grün).`, 'success');
-            }
-        }
-
-        /** (Action) Отменить резервирование (Зеленый) */
-        window.unreserveTank = async function(tankId) {
-            if (!isAuthReady) return;
-            const newData = JSON.parse(JSON.stringify(window.tanksData));
-            newData[tankId].status = 'empty';
-            newData[tankId].wineDetails = null;
-
-            const success = await saveTankDataToFirestore(newData);
-            if (success) {
-                closeModal();
-                window.showMessage(`Reservierung für Tank ${tankId} aufgehoben (Grün).`, 'success');
-            }
-        }
-        
-        // --- Логика Обновления UI ---
-
-        /** Обновляет стили кнопок фильтрации */
-        function updateFilterButtons(activeFilter) {
-            document.querySelectorAll('#filter-controls .filter-btn').forEach(button => {
-                button.classList.remove('ring-4', 'ring-offset-2', 'ring-gray-400', 'ring-offset-white'); 
-            });
-
-            const activeButton = document.getElementById(`filter-${activeFilter}`);
-            if (activeButton) {
-                activeButton.classList.add('ring-4', 'ring-offset-2', 'ring-gray-400', 'ring-offset-white');
-            }
-        }
-
-        /** Обновление внешнего вида Tanks'ов на плане (включая фильтрацию) */
-        function updateTankDisplay() {
-            // Используем tanksConfig для итерации, чтобы гарантировать правильный порядок
-            window.tanksConfig.forEach(config => {
-                const id = config.id;
-                const tankElement = document.querySelector(`.tank[data-id="${id}"]`);
-                const data = window.tanksData[id];
-
-                if (tankElement) {
-                    // Удаляем все классы статуса
-                    tankElement.classList.remove('tank-full', 'tank-empty', 'tank-reserved', 'tank-to-be-emptied', 'config-error');
-                    
-                    let isVisible = true;
-                    const status = data ? data.status : 'config-error';
-
-                    if (status !== 'config-error') {
-                        // Применение цветового класса
-                        tankElement.classList.add(`tank-${status.replace(/_/g, '-')}`);
-                    } else {
-                        // Обработка ошибки конфигурации (если нет динамических данных)
-                        tankElement.classList.add('config-error');
-                    }
-
-                    // Логика фильтрации
-                    const isFullCategory = status === 'full' || status === 'reserved';
-                    const isEmptyCategory = status === 'empty' || status === 'to_be_emptied';
-
-                    if (window.currentFilter === 'empty' && !isEmptyCategory) {
-                        isVisible = false;
-                    } else if (window.currentFilter === 'full' && !isFullCategory) {
-                        isVisible = false;
-                    } else if (window.currentFilter === 'all') {
-                        isVisible = true; 
-                    }
-                    
-                    tankElement.style.display = isVisible ? 'flex' : 'none';
-                    
-                    // Обновление отображаемых ID и Volume
-                    tankElement.querySelector('.text-xl').textContent = id;
-                    tankElement.querySelector('.text-xs').textContent = config.volume;
-
-                    // Обновляем data-id для правильной обработки кликов (на случай, если ID изменился)
-                    tankElement.setAttribute('data-id', id);
-
-                } 
-            });
-            updateFilterButtons(window.currentFilter);
-        }
-        
-        /** Фильтрует Tanks по статусу */
-        window.filterTanks = function(filter) {
-            window.currentFilter = filter;
-            updateTankDisplay();
-        }
-
-        /** Первичный рендеринг плана (создание DOM-элементов) */
-        function renderInitialPlan() {
-            const container = document.getElementById('plan-container');
-            // Собираем текущие ID элементов
-            const existingIds = Array.from(container.children).map(el => el.getAttribute('data-id'));
-            const configIds = window.tanksConfig.map(c => c.id);
-
-            // Удаляем элементы, которых нет в новой конфигурации
-            Array.from(container.children).forEach(tankElement => {
-                const id = tankElement.getAttribute('data-id');
-                if (!configIds.includes(id)) {
-                    tankElement.remove();
-                }
-            });
-
-            // Добавляем или обновляем элементы
-            window.tanksConfig.forEach(config => {
-                let tank = document.querySelector(`.tank[data-id="${config.id}"]`);
-                
-                if (!tank) {
-                    // Создание нового элемента
-                    tank = document.createElement('button');
-                    tank.className = 'tank';
-                    tank.setAttribute('data-id', config.id);
-                    tank.onclick = () => openTankDetailsModal(config.id);
-
-                    const idSpan = document.createElement('span');
-                    idSpan.className = 'text-xl font-bold';
-
-                    const volumeSpan = document.createElement('span');
-                    volumeSpan.className = 'text-xs';
-
-                    tank.appendChild(idSpan);
-                    tank.appendChild(volumeSpan);
-                    
-                    container.appendChild(tank);
-                }
-                
-                // Обновление содержимого (на случай, если ID или Volume изменились)
-                tank.querySelector('.text-xl').textContent = config.id;
-                tank.querySelector('.text-xs').textContent = config.volume;
-            });
-        }
-
-        // --- Инициализация ---
-        document.addEventListener('DOMContentLoaded', () => {
-            setupFirebaseAndAuth();
-            updateFilterButtons('all');
+        // Удаляем элементы, которых нет в новой конфигурации
+        Array.from(container.children).forEach((tankElement) => {
+          const id = tankElement.getAttribute("data-id");
+          if (!configIds.includes(id)) {
+            tankElement.remove();
+          }
         });
 
+        // Добавляем или обновляем элементы
+        window.tanksConfig.forEach((config) => {
+          let tank = document.querySelector(`.tank[data-id="${config.id}"]`);
+
+          if (!tank) {
+            // Создание нового элемента
+            tank = document.createElement("button");
+            tank.className = "tank";
+            tank.setAttribute("data-id", config.id);
+            tank.onclick = () => openTankDetailsModal(config.id);
+
+            const idSpan = document.createElement("span");
+            idSpan.className = "text-xl font-bold";
+
+            const volumeSpan = document.createElement("span");
+            volumeSpan.className = "text-xs";
+
+            tank.appendChild(idSpan);
+            tank.appendChild(volumeSpan);
+
+            container.appendChild(tank);
+          }
+
+          // Обновление содержимого (на случай, если ID или Volume изменились)
+          tank.querySelector(".text-xl").textContent = config.id;
+          tank.querySelector(".text-xs").textContent = config.volume;
+        });
+      }
+
+      // --- Инициализация ---
+      document.addEventListener("DOMContentLoaded", () => {
+        setupFirebaseAndAuth();
+        updateFilterButtons("all");
+      });
     </script>
-</body>
+  </body>
 </html>
