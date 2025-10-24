@@ -3,9 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wein-Tank-Management (Konfigurierbar)</title>
+    <title>Wein-Tank-Management (Synchronisiert)</title>
     <!-- Подключение Tailwind CSS для стилей -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Imports (ОБЯЗАТЕЛЬНЫЕ) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        // ИСПРАВЛЕНО: setLogLevel удален из импорта firebase-auth.js
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Глобальные переменные для доступа в скрипте ниже
+        // ИСПРАВЛЕНО: setLogLevel удален из глобального объекта window.firebase
+        window.firebase = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, updateDoc, writeBatch };
+    </script>
+    
     <style>
         /* Стиль для шрифта Inter */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -17,7 +29,6 @@
         /* Основной контейнер плана - адаптивная сетка */
         #plan-container {
             display: grid;
-            /* Адаптивная сетка: автоматическое размещение элементов, минимальная ширина колонки 120px */
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 10px;
             width: 95%;
@@ -81,11 +92,11 @@
 
     <!-- Заголовок и управление конфигурацией -->
     <header class="text-center mb-6">
-        <!-- ИЗМЕНЕНО: Заголовок больше не содержит (1-100) -->
         <h1 class="text-3xl font-bold text-gray-800">Wein-Tank-Management</h1>
         
         <div class="flex flex-col sm:flex-row justify-center items-center mt-2 space-y-2 sm:space-y-0 sm:space-x-4">
-            <p id="auth-status" class="text-sm text-gray-600">Status: Lokaler Speicher (localStorage)</p>
+            <!-- ОБНОВЛЕНО: Статус для Firestore -->
+            <p id="auth-status" class="text-sm text-gray-600">Status: Wird geladen...</p>
             <button onclick="openConfigModal()" class="px-3 py-1 bg-indigo-500 text-white text-sm rounded-lg font-semibold hover:bg-indigo-600 transition duration-150 shadow-md">
                 Tank-Konfiguration
             </button>
@@ -135,6 +146,14 @@
     <div id="message-box" class="fixed top-4 right-4 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50 transition-transform transform translate-x-full hidden"></div>
 
     <script>
+        // Глобальные переменные Firebase (доступны после импорта)
+        let db;
+        let auth;
+        let configRef;
+        let dataRef;
+        let userId = 'anonymous'; // Инициализация с анонимным значением
+        let isAuthReady = false;
+
         // Глобальный объект для хранения динамических данных (status, wineDetails)
         window.tanksData = {}; 
         // Глобальный массив для хранения конфигурации (id, volume). Размер больше не фиксированный.
@@ -143,45 +162,153 @@
         window.currentTankId = null;
         window.currentFilter = 'all'; 
         
-        // Ключи для localStorage
-        const DATA_STORAGE_KEY = 'WINE_TANK_DATA_V2';
+        // Ключи для localStorage (оставлены только для запасной генерации дефолтного конфига)
         const CONFIG_STORAGE_KEY = 'WINE_TANK_CONFIG_V1';
         
-        // --- Утилиты для Конфигурации ---
+        // --- Утилиты Firebase и Инициализация ---
+        
+        // Получение глобальных переменных из Canvas
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        /** Инициализация Firebase и Аутентификация */
+        async function setupFirebaseAndAuth() {
+            if (!window.firebase || !firebaseConfig) {
+                document.getElementById('auth-status').textContent = 'Fehler: Firebase Konfigurationsdaten fehlen.';
+                return;
+            }
 
-        /** ИЗМЕНЕНО: Генерирует 10 Tank'ов по умолчанию (ID 1-10, Volumen 5,000 L) */
+            try {
+                // Инициализация App и Firestore/Auth
+                const app = window.firebase.initializeApp(firebaseConfig);
+                db = window.firebase.getFirestore(app);
+                auth = window.firebase.getAuth(app);
+                
+                // Настройка пути к публичным данным в Firestore
+                configRef = window.firebase.doc(db, `artifacts/${appId}/public/data/tank_config`, 'current_config');
+                dataRef = window.firebase.doc(db, `artifacts/${appId}/public/data/tank_data`, 'current_state');
+
+                // setLogLevel('debug'); // Для отладки
+                
+                // Аутентификация
+                if (initialAuthToken) {
+                    await window.firebase.signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await window.firebase.signInAnonymously(auth);
+                }
+
+                window.firebase.onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        document.getElementById('auth-status').textContent = `Datenbank: Firestore (${user.isAnonymous ? 'Anonym' : 'Auth'})`;
+                        initializeStorageAndDisplay();
+                    } else {
+                        // Эта ветка не должна выполняться, так как мы используем анонимный вход
+                        isAuthReady = true;
+                        document.getElementById('auth-status').textContent = 'Fehler: Keine Benutzer-ID.';
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase Initialisierungsfehler:", error);
+                document.getElementById('auth-status').textContent = 'Fehler beim Laden der Datenbank.';
+            }
+        }
+
+        // --- Firebase CRUD Операции ---
+
+        /** Загружает Tank Config в реальном времени */
+        function subscribeToConfig() {
+            // Возвращает функцию отписки (unsubscribe), но нам она не нужна, т.к. приложение одностраничное
+            window.firebase.onSnapshot(configRef, (docSnap) => {
+                if (docSnap.exists() && docSnap.data().config && Array.isArray(docSnap.data().config)) {
+                    window.tanksConfig = docSnap.data().config;
+                    console.log("Config aus Firestore geladen:", window.tanksConfig.length, "Tanks.");
+                } else {
+                    // Если данных нет, используем конфигурацию по умолчанию и сразу сохраняем
+                    window.tanksConfig = generateDefaultConfig();
+                    saveConfigToFirestore(window.tanksConfig, true); // Принудительное сохранение
+                }
+                renderInitialPlan();
+                updateTankDisplay();
+            }, (error) => {
+                console.error("Fehler beim Abonnieren der Konfiguration:", error);
+                window.showMessage('Fehler beim Laden der Konfiguration aus der Datenbank.', 'error');
+            });
+        }
+
+        /** Загружает Tank Data в реальном времени */
+        function subscribeToData() {
+            window.firebase.onSnapshot(dataRef, (docSnap) => {
+                if (docSnap.exists() && docSnap.data().data && typeof docSnap.data().data === 'object') {
+                    window.tanksData = docSnap.data().data;
+                    console.log("Tank-Daten aus Firestore geladen:", Object.keys(window.tanksData).length, "Daten.");
+                } else {
+                    // Если данных нет, создаем пустой объект и сохраняем
+                    window.tanksData = {}; 
+                    // Не нужно сохранять сразу, т.к. saveConfigToFirestore позаботится о синхронизации данных
+                }
+                updateTankDisplay();
+            }, (error) => {
+                console.error("Fehler beim Abonnieren der Tank-Daten:", error);
+                window.showMessage('Fehler beim Laden der Tank-Daten aus der Datenbank.', 'error');
+            });
+        }
+        
+        /** Сохраняет текущий Tank Config в Firestore */
+        async function saveConfigToFirestore(configToSave) {
+            if (!isAuthReady || !db) {
+                window.showMessage('Datenbank ist nicht bereit. Bitte warten Sie kurz.', 'warning');
+                return;
+            }
+            try {
+                // Используем setDoc для полной перезаписи конфигурации
+                await window.firebase.setDoc(configRef, { config: configToSave });
+                return true;
+            } catch (error) {
+                console.error("Fehler beim Speichern der Konfiguration:", error);
+                window.showMessage('Speichern der Konfiguration fehlgeschlagen!', 'error');
+                return false;
+            }
+        }
+        
+        /** Сохраняет текущие динамические данные Tank'ов в Firestore */
+        async function saveTankDataToFirestore(dataToSave) {
+            if (!isAuthReady || !db) {
+                window.showMessage('Datenbank ist nicht bereit. Bitte warten Sie kurz.', 'warning');
+                return;
+            }
+            try {
+                // Используем setDoc для полной перезаписи состояния
+                await window.firebase.setDoc(dataRef, { data: dataToSave });
+                return true;
+            } catch (error) {
+                console.error("Fehler beim Speichern der Tank-Daten:", error);
+                window.showMessage('Speichern der Tank-Daten fehlgeschlagen!', 'error');
+                return false;
+            }
+        }
+
+        // --- Утилиты для Конфигурации (unchanged) ---
+
+        /** Генерирует 10 Tank'ов по умолчанию */
         function generateDefaultConfig() {
             const defaultConfig = [];
-            for (let i = 0; i = 0; i++) { 
+            for (let i = 0; i <= 0; i++) {
                 defaultConfig.push({
-                    position: i.toString(), // Позиция в сетке (для внутреннего ID в модале)
-                    id: i.toString(),       // Фактический номер Tank'а
-                    volume: '0'       // Объем
+                    position: i.toString(),
+                    id: i.toString(),
+                    volume: '0'
                 });
             }
+            // Сохраняем как резервную копию в localStorage
+            try {
+                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(defaultConfig));
+            } catch (e) {
+                console.warn("localStorage Speicherung fehlgeschlagen.");
+            }
             return defaultConfig;
-        }
-
-        /** Загружает конфигурацию Tank'ов из localStorage */
-        function loadConfigFromStorage() {
-            try {
-                const storedConfig = localStorage.getItem(CONFIG_STORAGE_KEY);
-                // Если конфиг есть, загружаем его, иначе генерируем 10 по умолчанию
-                return storedConfig ? JSON.parse(storedConfig) : generateDefaultConfig();
-            } catch (e) {
-                console.error("Fehler beim Laden der Tank-Konfiguration:", e);
-                return generateDefaultConfig();
-            }
-        }
-
-        /** Сохраняет текущую конфигурацию Tank'ов в localStorage */
-        function saveConfigToStorage() {
-            try {
-                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(window.tanksConfig));
-            } catch (e) {
-                console.error("Fehler beim Speichern der Tank-Konfiguration:", e);
-                window.showMessage('Fehler beim Speichern der Konfiguration lokal.', 'error');
-            }
         }
 
         /** Возвращает объект конфигурации Tank'а по его Tank-ID */
@@ -189,34 +316,6 @@
             return window.tanksConfig.find(c => c.id === id);
         }
         
-        // --- Утилиты для динамических данных ---
-
-        /** Загружает динамические данные Tank'ов из localStorage */
-        function loadTanksFromStorage() {
-            try {
-                const storedData = localStorage.getItem(DATA_STORAGE_KEY);
-                return storedData ? JSON.parse(storedData) : {};
-            } catch (e) {
-                console.error("Fehler beim Laden der dynamischen Daten aus localStorage:", e);
-                return {};
-            }
-        }
-
-        /** Сохраняет текущие динамические данные Tank'ов в localStorage */
-        function saveTanksToStorage() {
-            try {
-                // Удаляем старые/ненужные поля для чистоты
-                const dataToSave = JSON.parse(JSON.stringify(window.tanksData));
-                Object.keys(dataToSave).forEach(id => {
-                    if (dataToSave[id].isFull !== undefined) delete dataToSave[id].isFull;
-                });
-                localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(dataToSave));
-            } catch (e) {
-                console.error("Fehler beim Speichern der dynamischen Daten in localStorage:", e);
-                window.showMessage('Fehler beim Speichern der Daten lokal.', 'error');
-            }
-        }
-
         /** Показывает сообщение на экране вместо alert() */
         window.showMessage = function(message, type = 'success') {
             const box = document.getElementById('message-box');
@@ -238,49 +337,13 @@
             }, 3000);
         }
         
-        /** Инициализация хранилища: загрузка конфигурации и динамических данных */
+        /** Инициализация хранилища: подписка на данные Firestore */
         function initializeStorageAndDisplay() {
-            // 1. Загрузка/Генерация Конфигурации
-            window.tanksConfig = loadConfigFromStorage();
+            if (!isAuthReady) return;
             
-            // 2. Загрузка Динамического Состояния
-            const loadedData = loadTanksFromStorage();
-            
-            // Используем ID из конфигурации для инициализации состояния
-            const configTankIds = window.tanksConfig.map(c => c.id);
-
-            let needsUpdate = false;
-            window.tanksData = {}; // Сброс карты данных
-
-            configTankIds.forEach(id => {
-                let tank = loadedData[id];
-
-                if (tank) {
-                    // Используем существующее состояние, очищаем старые свойства
-                    if (tank.isFull !== undefined) delete tank.isFull;
-                    if (!tank.status) tank.status = 'empty';
-                    window.tanksData[id] = tank;
-                } else {
-                    // Инициализируем новый Tank, если его ID есть в конфигурации, но нет в данных
-                    window.tanksData[id] = {
-                        id: id,
-                        status: 'empty',
-                        wineDetails: null
-                    };
-                    needsUpdate = true;
-                }
-            });
-
-            // Note: Stale data (old IDs not in config) will be ignored on display/load
-            // and remains in storage until explicitly cleaned, which is acceptable.
-
-            if (needsUpdate) {
-                saveTanksToStorage();
-            }
-            
-            // 3. Обновление UI
-            renderInitialPlan();
-            updateTankDisplay();
+            // Запуск подписок в реальном времени
+            subscribeToConfig();
+            subscribeToData();
         }
 
 
@@ -290,7 +353,7 @@
         window.closeModal = function() {
             document.getElementById('modal').classList.add('hidden');
             document.getElementById('modal').classList.remove('flex');
-            // Очищаем форму конфигурации, если она была открыта
+
             const configForm = document.getElementById('config-form');
             if (configForm) configForm.remove();
 
@@ -305,12 +368,10 @@
             document.getElementById('modal').classList.remove('hidden');
             document.getElementById('modal').classList.add('flex');
 
-            // Устанавливаем ширину для окна Tank Details
             if (title.startsWith('Tank Nr.')) {
                 document.getElementById('modal-container').classList.remove('max-w-4xl');
                 document.getElementById('modal-container').classList.add('max-w-md');
             } 
-            // Устанавливаем ширину для окна Конфигурации
             else if (title === 'Tank-Konfiguration') {
                 document.getElementById('modal-container').classList.remove('max-w-md');
                 document.getElementById('modal-container').classList.add('max-w-4xl');
@@ -318,18 +379,21 @@
         }
 
 
-        // --- Логика Tank Configuration ---
+        // --- Логика Tank Configuration (Обновлено для Firestore) ---
 
         /** Открывает модальное окно для конфигурации Tank'ов */
         window.openConfigModal = function() {
-            const config = window.tanksConfig;
+            // Важно: работаем с копией, чтобы изменения не влияли на основную переменную до сохранения
+            const currentConfigCopy = JSON.parse(JSON.stringify(window.tanksConfig)); 
+            
             let tableRows = '';
 
-            config.forEach(item => {
-                // Примечание: position - это порядковый номер в массиве, используем его как Row ID для DOM
+            currentConfigCopy.forEach((item, index) => {
+                // position - это порядковый номер в массиве, используем его как Row ID для DOM
+                // Используем config.position для Row ID, но обновляем отображаемую Pos.
                 tableRows += `
-                    <tr id="config-row-${item.position}" class="hover:bg-gray-50 border-t">
-                        <td class="px-2 py-2 text-sm text-gray-500">${item.position}</td>
+                    <tr id="config-row-${item.position}" data-original-id="${item.id}" class="hover:bg-gray-50 border-t">
+                        <td class="px-2 py-2 text-sm text-gray-500">${index + 1}</td>
                         <td class="px-2 py-2">
                             <input type="text" name="id_${item.position}" value="${item.id}" required 
                                    class="w-full border border-gray-300 rounded-md shadow-sm p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500 font-semibold" 
@@ -339,7 +403,6 @@
                             <input type="text" name="volume_${item.position}" value="${item.volume}" required 
                                    class="w-full border border-gray-300 rounded-md shadow-sm p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500">
                         </td>
-                        <!-- ДОБАВЛЕНА КОЛОНКА ДЕЙСТВИЯ (Tank löschen) -->
                         <td class="px-2 py-2 text-center w-1/12">
                             <button type="button" onclick="deleteTankRow('${item.position}')" title="Tank löschen" 
                                     class="text-red-500 hover:text-red-700 transition duration-150 p-1">
@@ -350,7 +413,6 @@
                 `;
             });
 
-            // ИЗМЕНЕНО: Добавлен id="config-table-body" к tbody и кнопка "Tank hinzufügen"
             const contentHtml = `
                 <form id="config-form" onsubmit="event.preventDefault(); saveConfigChanges(event)" class="space-y-4">
                     <p class="text-sm text-gray-600">Bearbeiten Sie die ID (Tank Nr.) und das Volumen für jede Tank-Position. Speichern Sie, um die Änderungen zu übernehmen.</p>
@@ -384,16 +446,21 @@
             openGenericModal('Tank-Konfiguration', contentHtml, footerHtml);
         }
 
-        /** НОВАЯ ФУНКЦИЯ: Удаляет строку Tank'а из модального окна конфигурации (перед сохранением) */
+        /** Удаляет строку Tank'а из модального окна конфигурации (перед сохранением) */
         window.deleteTankRow = function(position) {
             const row = document.getElementById(`config-row-${position}`);
             if (row) {
                 row.remove();
+                // Пересчитываем номера позиций в первой колонке
+                const tbody = document.getElementById('config-table-body');
+                for (let i = 0; i < tbody.rows.length; i++) {
+                    tbody.rows[i].cells[0].textContent = (i + 1).toString();
+                }
                 window.showMessage(`Tank-Position ${position} zur Löschung vorgemerkt. Speichern, um zu bestätigen.`, 'warning');
             }
         }
 
-        /** НОВАЯ ФУНКЦИЯ: Добавляет новую строку для Tank'а в модальное окно конфигурации */
+        /** Добавляет новую строку для Tank'а в модальное окно конфигурации */
         window.addTankToConfigModal = function() {
             const tbody = document.getElementById('config-table-body');
             if (!tbody) return;
@@ -401,11 +468,11 @@
             // Используем уникальный временный ID для новой строки
             const newPosition = 'new_' + Date.now(); 
             const newDisplayPosition = tbody.rows.length + 1;
-            const newId = newDisplayPosition.toString(); 
+            const newId = (newDisplayPosition).toString(); 
             const newVolume = '0'; 
 
             const tr = document.createElement('tr');
-            tr.id = `config-row-${newPosition}`; // Уникальный ID для удаления
+            tr.id = `config-row-${newPosition}`; 
             tr.className = 'hover:bg-gray-50 border-t';
             tr.innerHTML = `
                 <td class="px-2 py-2 text-sm text-gray-500">${newDisplayPosition}</td>
@@ -427,15 +494,14 @@
             `;
             tbody.appendChild(tr);
 
-            // Прокрутка к новому элементу
             tr.scrollIntoView({ behavior: 'smooth', block: 'end' });
         }
 
-        /** ИЗМЕНЕНО: Сохраняет изменения конфигурации, читая из DOM */
-        window.saveConfigChanges = function(event) {
+        /** ОБНОВЛЕНО: Сохраняет изменения конфигурации и отправляет их в Firestore */
+        window.saveConfigChanges = async function(event) {
             const tbody = document.getElementById('config-table-body');
-            if (!tbody) {
-                console.error("Config table body not found!");
+            if (!tbody || !isAuthReady) {
+                window.showMessage("Datenbank nicht bereit oder Konfigurationsformular fehlt.", 'error');
                 return;
             }
 
@@ -443,39 +509,27 @@
             const newIds = [];
             let hasError = false;
 
-            // ИЗМЕНЕНО: Итерация по СУЩЕСТВУЮЩИМ строкам <tr> в <tbody>
+            // 1. Сбор и валидация данных из формы
             for (let i = 0; i < tbody.rows.length; i++) {
                 const row = tbody.rows[i];
-                // Обновляем отображаемую позицию (первая ячейка)
-                const positionCell = row.cells[0]; 
-                positionCell.textContent = (i + 1).toString(); // Новая позиция в массиве
-
                 const idInput = row.cells[1].querySelector('input');
                 const volumeInput = row.cells[2].querySelector('input');
 
-                if (!positionCell || !idInput || !volumeInput) {
-                    console.error("Fehler beim Lesen der Zeile:", row);
-                    hasError = true;
-                    break;
-                }
-
-                const position = (i + 1).toString(); // Используем фактический индекс как позицию
+                const position = (i + 1).toString();
                 const newId = idInput.value.trim();
                 const newVolume = volumeInput.value.trim();
+                
+                // Сброс ошибок
+                idInput.classList.remove('config-error');
+                volumeInput.classList.remove('config-error');
 
-                // Проверка на пустые значения
                 if (newId === '' || newVolume === '') {
                     window.showMessage(`Fehler: ID und Volumen dürfen nicht leer sein (Pos. ${position}).`, 'error');
                     idInput.classList.add('config-error');
                     volumeInput.classList.add('config-error');
                     hasError = true;
                     break;
-                } else {
-                    idInput.classList.remove('config-error');
-                    volumeInput.classList.remove('config-error');
                 }
-
-                // Проверка на дублирование ID
                 if (newIds.includes(newId)) {
                     window.showMessage(`Fehler: Die Tank ID "${newId}" ist dupliziert.`, 'error');
                     idInput.classList.add('config-error');
@@ -485,55 +539,56 @@
                 newIds.push(newId);
 
                 newConfig.push({
-                    // Важно: 'position' теперь отражает порядковый номер в НОВОЙ конфигурации
-                    position: position, 
+                    position: position,
                     id: newId,
-                    volume: newVolume
+                    volume: newVolume,
                 });
             }
-            // КОНЕЦ ИЗМЕНЕННОГО БЛОКА
 
             if (hasError) return;
 
-            // 1. Обновление tanksConfig
-            window.tanksConfig = newConfig;
-            saveConfigToStorage();
-
-            // 2. Обновление tanksData:
-            // Старые данные, которых нет в новой конфигурации, будут удалены.
-            const oldData = JSON.parse(JSON.stringify(window.tanksData));
+            // 2. Слияние (Merge) с текущим состоянием данных (tanksData)
+            const oldTankData = JSON.parse(JSON.stringify(window.tanksData));
             const newTankData = {};
             
-            window.tanksConfig.forEach(config => {
+            newConfig.forEach(config => {
                 const newId = config.id;
                 
-                // Если Tank с таким ID уже существует в oldData, переносим его
-                if (oldData[newId]) {
-                    newTankData[newId] = oldData[newId];
-                    // Убеждаемся, что ID в данных актуален (хотя он и так ключ)
-                    newTankData[newId].id = newId;
+                // Если Tank с новым ID уже существует в старых данных, переносим его состояние
+                if (oldTankData[newId]) {
+                    newTankData[newId] = oldTankData[newId];
                 } else {
-                    // Это новый Tank (добавленный или ID был изменен)
-                    // Мы не можем знать, какому старому Tank'у он 
-                    // соответствует, поэтому создаем его как новый.
+                    // Иначе создаем новый (статус 'empty')
                     newTankData[newId] = { id: newId, status: 'empty', wineDetails: null };
                 }
             });
+            // Старые Tank'и, чьи ID были удалены или изменены, не попадут в newTankData и будут удалены из Firestore при сохранении.
 
-
-            window.tanksData = newTankData;
-            saveTanksToStorage();
-
-            // 3. Обновление UI
-            closeModal();
-            renderInitialPlan();
-            updateTankDisplay();
-            window.showMessage('Tank-Konfiguration erfolgreich gespeichert und angewendet!', 'success');
+            // 3. Атомарное сохранение конфигурации и данных в Firestore
+            const batch = window.firebase.writeBatch(db);
+            
+            // Запись новой конфигурации
+            batch.set(configRef, { config: newConfig });
+            
+            // Запись обновленных данных Tank'ов
+            batch.set(dataRef, { data: newTankData });
+            
+            try {
+                await batch.commit();
+                
+                // После успешного коммита, onSnapshot обновит локальные window.tanksConfig и window.tanksData
+                closeModal();
+                window.showMessage('Tank-Konfiguration und Tank-Daten erfolgreich synchronisiert!', 'success');
+            } catch (error) {
+                console.error("Fehler beim Batch-Speichern:", error);
+                window.showMessage('Speichern der Konfiguration und Daten fehlgeschlagen!', 'error');
+            }
         }
 
-        // --- Логика Tank Details (Модальное окно Tank'а) ---
 
-        /** Обновляет модальное окно в зависимости от статуса Tank'а */
+        // --- Логика Tank Details и Actions (Обновлено для Firestore) ---
+
+        /** Обновляет модальное окно в зависимости от статуса Tank'а (без изменений) */
         window.openTankDetailsModal = function(tankId) {
             window.currentTankId = tankId;
             const tank = window.tanksData[tankId];
@@ -549,7 +604,6 @@
             let htmlContent = '';
             const currentStatus = tank.status;
 
-            // Информация о вине (для заполненных и "к опустошению" статусов)
             const wineInfoHtml = (tank.wineDetails && (currentStatus === 'full' || currentStatus === 'to_be_emptied' || currentStatus === 'reserved')) ? `
                 <div class="space-y-3 mt-4 p-4 border rounded-lg bg-gray-50">
                     <p class="text-sm font-semibold text-gray-700">Wein-Details:</p>
@@ -562,10 +616,9 @@
             let footerHtml = '';
 
             switch (currentStatus) {
-                case 'full': { // Отдельный блок для 'full'
+                case 'full': {
                     const statusText = `<span class="text-red-600 font-bold">Gefüllt</span>`;
                     
-                    // ИЗМЕНЕНО: Добавлены 2 кнопки, как запрошено. Кнопка "Tank jetzt leeren" теперь зеленая.
                     const actionButton = `
                         <button onclick="markForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition duration-150 shadow-md">Für Entleerung vormerken (Blau)</button>
                         <button onclick="emptyTank('${tankId}')" class="w-full mt-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition duration-150 shadow-md">Tank jetzt leeren (Grün)</button>
@@ -576,10 +629,9 @@
                     break;
                 }
 
-                case 'to_be_emptied': { // Отдельный блок для 'to_be_emptied'
+                case 'to_be_emptied': { 
                     const statusText = `<span class="text-blue-600 font-bold">Wird Leer</span>`;
                     
-                    // Оригинальные кнопки для этого статуса. Кнопка "Tank jetzt leeren" теперь зеленая.
                     const actionButton = `
                           <button onclick="undoMarkForEmptying('${tankId}')" class="w-full mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Markierung Rückgängig (Rot)</button>
                           <button onclick="emptyTank('${tankId}')" class="w-full mt-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition duration-150 shadow-md">Tank jetzt leeren (Grün)</button>
@@ -597,14 +649,10 @@
                     let formButtons;
                     let reserveButtonExternal = '';
                     
-                    // --- Vordefinierte Details aus Reservierung laden ---
                     const currentDetails = tank.wineDetails || {};
                     const prefilledYear = currentDetails.year || new Date().getFullYear();
                     const prefilledVariety = currentDetails.variety || '';
-                    // const prefilledQuality = currentDetails.quality || 'Gutswein'; // Удалено
 
-
-                    // --- Formularfelder (Rebsorte ist immer required) ---
                     const formFields = `
                         <div class="mb-3">
                             <label for="wine-year" class="block text-sm font-medium text-gray-700">Jahrgang (JJJJ)</label>
@@ -615,19 +663,15 @@
                             <input type="text" id="wine-variety" name="variety" required placeholder="Z.B. Cabernet Sauvignon" value="${prefilledVariety}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500">
                         </div>
                     `;
-                        // Удален блок <div class="mb-4">...</div> для Qualität (Klassifikation)
 
                     if (isReserved) {
-                        // RESERVIERT (Gelb) - Фокус на заполнении -> ROT
                         formTitle = `<p class="mb-4 text-yellow-700 font-bold">RESERVIERT für ${prefilledVariety}. Daten überprüfen und zum Füllen bereit.</p>`;
                         formButtons = `
                             <button type="submit" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition duration-150 shadow-md text-lg" data-target-status="full">Füllen & Status auf ROT setzen</button>
                         `;
-                        // Отдельная кнопка для отмены резервирования
                         reserveButtonExternal = `<button onclick="unreserveTank('${tankId}')" class="w-full mt-3 px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition duration-150 shadow-md">Reservierung aufheben (Grün)</button>`;
 
                     } else {
-                        // LEER (Grün) - Фокус на заполнении -> ROT или резервировании -> GELB
                         formTitle = `<p class="mb-4 text-green-600 font-bold">Leer. Geben Sie die Weindaten ein, um den Tank zu füllen oder zu reservieren.</p>`;
                         formButtons = `
                             <button type="submit" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition duration-150 shadow-md text-lg" data-target-status="full">Wein hinzufügen & füllen (Rot)</button>
@@ -650,7 +694,97 @@
             openGenericModal(`Tank Nr.${tankId} (${volume})`, htmlContent, footerHtml);
         }
 
-        // --- Логика Обновления Tank'ов ---
+        /** Обработчик формы для 'empty' и 'reserved' */
+        window.handleWineAction = async function(event) {
+            const form = event.target;
+            const targetStatus = event.submitter.getAttribute('data-target-status');
+            const tankId = window.currentTankId;
+
+            if (!targetStatus || !tankId || !isAuthReady) return;
+
+            const varietyInput = form.elements['variety'];
+            if (!varietyInput.value.trim()) {
+                window.showMessage('Rebsorte ist ein Pflichtfeld.', 'error');
+                varietyInput.focus();
+                varietyInput.classList.add('config-error');
+                return;
+            }
+            varietyInput.classList.remove('config-error');
+
+            const wineDetails = {
+                year: form.elements['year'].value || new Date().getFullYear(),
+                variety: varietyInput.value.trim(),
+                addedAt: new Date().toISOString()
+            };
+            
+            // ОБНОВЛЕНО: Создание копии, обновление и сохранение в Firestore
+            const newData = JSON.parse(JSON.stringify(window.tanksData));
+            newData[tankId].status = targetStatus;
+            newData[tankId].wineDetails = wineDetails;
+            
+            const success = await saveTankDataToFirestore(newData);
+
+            if (success) {
+                closeModal();
+                window.showMessage(`Tank ${tankId} wurde erfolgreich als '${targetStatus}' markiert.`, 'success');
+            }
+        }
+
+        /** (Action) Пометить для опустошения (Синий) */
+        window.markForEmptying = async function(tankId) {
+            if (!isAuthReady) return;
+            const newData = JSON.parse(JSON.stringify(window.tanksData));
+            newData[tankId].status = 'to_be_emptied';
+            
+            const success = await saveTankDataToFirestore(newData);
+            if (success) {
+                closeModal();
+                window.showMessage(`Tank ${tankId} zur Entleerung vorgemerkt (Blau).`, 'info');
+            }
+        }
+
+        /** (Action) Отменить пометку (Красный) */
+        window.undoMarkForEmptying = async function(tankId) {
+            if (!isAuthReady) return;
+            const newData = JSON.parse(JSON.stringify(window.tanksData));
+            newData[tankId].status = 'full';
+
+            const success = await saveTankDataToFirestore(newData);
+            if (success) {
+                closeModal();
+                window.showMessage(`Vormerkung für Tank ${tankId} aufgehoben (Rot).`, 'warning');
+            }
+        }
+
+        /** (Action) Опустошить Tank (Зеленый) */
+        window.emptyTank = async function(tankId) {
+            if (!isAuthReady) return;
+            const newData = JSON.parse(JSON.stringify(window.tanksData));
+            newData[tankId].status = 'empty';
+            newData[tankId].wineDetails = null;
+
+            const success = await saveTankDataToFirestore(newData);
+            if (success) {
+                closeModal();
+                window.showMessage(`Tank ${tankId} wurde geleert (Grün).`, 'success');
+            }
+        }
+
+        /** (Action) Отменить резервирование (Зеленый) */
+        window.unreserveTank = async function(tankId) {
+            if (!isAuthReady) return;
+            const newData = JSON.parse(JSON.stringify(window.tanksData));
+            newData[tankId].status = 'empty';
+            newData[tankId].wineDetails = null;
+
+            const success = await saveTankDataToFirestore(newData);
+            if (success) {
+                closeModal();
+                window.showMessage(`Reservierung für Tank ${tankId} aufgehoben (Grün).`, 'success');
+            }
+        }
+        
+        // --- Логика Обновления UI ---
 
         /** Обновляет стили кнопок фильтрации */
         function updateFilterButtons(activeFilter) {
@@ -669,7 +803,6 @@
             // Используем tanksConfig для итерации, чтобы гарантировать правильный порядок
             window.tanksConfig.forEach(config => {
                 const id = config.id;
-                // Находим элемент по data-id
                 const tankElement = document.querySelector(`.tank[data-id="${id}"]`);
                 const data = window.tanksData[id];
 
@@ -697,24 +830,19 @@
                     } else if (window.currentFilter === 'full' && !isFullCategory) {
                         isVisible = false;
                     } else if (window.currentFilter === 'all') {
-                        isVisible = true; // Сброс видимости для "все"
+                        isVisible = true; 
                     }
                     
-                    // Применение видимости
                     tankElement.style.display = isVisible ? 'flex' : 'none';
                     
-                    // Обновление отображаемых ID и Volume на случай, если они были изменены в Konfiguration
+                    // Обновление отображаемых ID и Volume
                     tankElement.querySelector('.text-xl').textContent = id;
                     tankElement.querySelector('.text-xs').textContent = config.volume;
 
                     // Обновляем data-id для правильной обработки кликов (на случай, если ID изменился)
                     tankElement.setAttribute('data-id', id);
 
-                } else {
-                    // Если TankElement отсутствует (например, был добавлен), его нужно создать
-                    // Это обрабатывается в renderInitialPlan
-                    console.warn(`TankElement mit data-id=${id} nicht gefunden. Wird bei renderInitialPlan() erstellt.`);
-                }
+                } 
             });
             updateFilterButtons(window.currentFilter);
         }
@@ -725,113 +853,53 @@
             updateTankDisplay();
         }
 
-        /** Обработчик формы для 'empty' и 'reserved' */
-        window.handleWineAction = function(event) {
-            const form = event.target;
-            const targetStatus = event.submitter.getAttribute('data-target-status');
-            const tankId = window.currentTankId;
-
-            if (!targetStatus || !tankId) return;
-
-            const varietyInput = form.elements['variety'];
-            if (!varietyInput.value.trim()) {
-                window.showMessage('Rebsorte ist ein Pflichtfeld.', 'error');
-                varietyInput.focus();
-                varietyInput.classList.add('config-error');
-                return;
-            }
-            varietyInput.classList.remove('config-error');
-
-            const wineDetails = {
-                year: form.elements['year'].value || new Date().getFullYear(),
-                variety: varietyInput.value.trim(),
-                // quality: form.elements['quality'].value, // Удалено
-                addedAt: new Date().toISOString()
-            };
-            
-            // --- НАЧАЛО ВОССТАНОВЛЕННОГО БЛОКА ---
-            
-            // Обновляем данные
-            window.tanksData[tankId].status = targetStatus;
-            window.tanksData[tankId].wineDetails = wineDetails;
-            
-            saveTanksToStorage();
-            updateTankDisplay();
-            closeModal();
-            window.showMessage(`Tank ${tankId} wurde erfolgreich als '${targetStatus}' markiert.`, 'success');
-        }
-
-        /** (Action) Пометить для опустошения (Синий) */
-        window.markForEmptying = function(tankId) {
-            window.tanksData[tankId].status = 'to_be_emptied';
-            saveTanksToStorage();
-            updateTankDisplay();
-            closeModal();
-            window.showMessage(`Tank ${tankId} zur Entleerung vorgemerkt (Blau).`, 'info');
-        }
-
-        /** (Action) Отменить пометку (Красный) */
-        window.undoMarkForEmptying = function(tankId) {
-            window.tanksData[tankId].status = 'full';
-            saveTanksToStorage();
-            updateTankDisplay();
-            closeModal();
-            window.showMessage(`Vormerkung für Tank ${tankId} aufgehoben (Rot).`, 'warning');
-        }
-
-        /** (Action) Опустошить Tank (Зеленый) */
-        window.emptyTank = function(tankId) {
-            window.tanksData[tankId].status = 'empty';
-            window.tanksData[tankId].wineDetails = null;
-            saveTanksToStorage();
-            updateTankDisplay();
-            closeModal();
-            window.showMessage(`Tank ${tankId} wurde geleert (Grün).`, 'success');
-        }
-
-        /** (Action) Отменить резервирование (Зеленый) */
-        window.unreserveTank = function(tankId) {
-            window.tanksData[tankId].status = 'empty';
-            window.tanksData[tankId].wineDetails = null;
-            saveTanksToStorage();
-            updateTankDisplay();
-            closeModal();
-            window.showMessage(`Reservierung für Tank ${tankId} aufgehoben (Grün).`, 'success');
-        }
-
         /** Первичный рендеринг плана (создание DOM-элементов) */
         function renderInitialPlan() {
             const container = document.getElementById('plan-container');
-            container.innerHTML = ''; // Очищаем контейнер
+            // Собираем текущие ID элементов
+            const existingIds = Array.from(container.children).map(el => el.getAttribute('data-id'));
+            const configIds = window.tanksConfig.map(c => c.id);
 
-            // Используем tanksConfig для рендеринга
+            // Удаляем элементы, которых нет в новой конфигурации
+            Array.from(container.children).forEach(tankElement => {
+                const id = tankElement.getAttribute('data-id');
+                if (!configIds.includes(id)) {
+                    tankElement.remove();
+                }
+            });
+
+            // Добавляем или обновляем элементы
             window.tanksConfig.forEach(config => {
-                const tank = document.createElement('button');
-                tank.className = 'tank';
-                tank.setAttribute('data-id', config.id);
+                let tank = document.querySelector(`.tank[data-id="${config.id}"]`);
                 
-                // Внутренняя структура
-                const idSpan = document.createElement('span');
-                idSpan.className = 'text-xl font-bold';
-                idSpan.textContent = config.id;
+                if (!tank) {
+                    // Создание нового элемента
+                    tank = document.createElement('button');
+                    tank.className = 'tank';
+                    tank.setAttribute('data-id', config.id);
+                    tank.onclick = () => openTankDetailsModal(config.id);
 
-                const volumeSpan = document.createElement('span');
-                volumeSpan.className = 'text-xs';
-                volumeSpan.textContent = config.volume;
+                    const idSpan = document.createElement('span');
+                    idSpan.className = 'text-xl font-bold';
 
-                tank.appendChild(idSpan);
-                tank.appendChild(volumeSpan);
+                    const volumeSpan = document.createElement('span');
+                    volumeSpan.className = 'text-xs';
+
+                    tank.appendChild(idSpan);
+                    tank.appendChild(volumeSpan);
+                    
+                    container.appendChild(tank);
+                }
                 
-                // Добавляем обработчик клика
-                tank.onclick = () => openTankDetailsModal(config.id);
-                
-                container.appendChild(tank);
+                // Обновление содержимого (на случай, если ID или Volume изменились)
+                tank.querySelector('.text-xl').textContent = config.id;
+                tank.querySelector('.text-xs').textContent = config.volume;
             });
         }
 
         // --- Инициализация ---
         document.addEventListener('DOMContentLoaded', () => {
-            initializeStorageAndDisplay();
+            setupFirebaseAndAuth();
             updateFilterButtons('all');
         });
 
